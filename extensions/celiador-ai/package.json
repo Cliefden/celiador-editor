@@ -1,0 +1,130 @@
+{
+  "name": "celiador-ai",
+  "displayName": "Celiador AI",
+  "description": "Celiador's AI layer — chat and agent, wired to the Celiador daemon.",
+  "version": "0.0.2",
+  "publisher": "celiador",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "The Celiador agent reads and edits files in your workspace; every write is confirmed before it is applied."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "celiador.openChat",
+        "title": "Celiador: Open Chat",
+        "category": "Celiador"
+      },
+      {
+        "command": "celiador.checkConnection",
+        "title": "Celiador: Check Daemon Connection",
+        "category": "Celiador"
+      },
+      {
+        "command": "celiador.setApiKey",
+        "title": "Celiador: Set API Key",
+        "category": "Celiador"
+      },
+      {
+        "command": "celiador.signIn",
+        "title": "Celiador: Sign In",
+        "category": "Celiador"
+      },
+      {
+        "command": "celiador.signOut",
+        "title": "Celiador: Sign Out",
+        "category": "Celiador"
+      }
+    ],
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "celiador",
+          "title": "Celiador",
+          "icon": "media/celiador.svg"
+        }
+      ]
+    },
+    "views": {
+      "celiador": [
+        {
+          "id": "celiador.chat",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Celiador",
+      "properties": {
+        "celiador.daemonUrl": {
+          "type": "string",
+          "default": "https://celiador.ai",
+          "description": "Base URL of the Celiador daemon the AI layer talks to."
+        },
+        "celiador.supabaseUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Override the Supabase/GoTrue base URL used for sign-in. Leave empty to use the value from the daemon's `GET /api/config` (self-hosted defaults to the daemon URL)."
+        },
+        "celiador.token": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (`CELIADOR_AGENT_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** — your Supabase session is used instead."
+        },
+        "celiador.provider": {
+          "type": "string",
+          "enum": ["anthropic", "daemon"],
+          "default": "anthropic",
+          "markdownDescription": "Where the agent runs. `anthropic`: call Claude directly (needs an API key). `daemon`: route through the Celiador daemon (`celiador.daemonUrl`) using `celiador.token` — no client-side API key; the daemon holds the credential."
+        },
+        "celiador.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Anthropic API key for `anthropic` provider (fallback). Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage → this setting → `ANTHROPIC_API_KEY`."
+        },
+        "celiador.autoApproveEdits": {
+          "type": "boolean",
+          "default": false,
+          "description": "Apply the agent's file writes without asking. When off (default), each write to a new/changed path requires confirmation."
+        },
+        "celiador.model": {
+          "type": "string",
+          "default": "claude-opus-4-8",
+          "description": "Claude model the agent uses."
+        },
+        "celiador.effort": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "xhigh", "max"],
+          "default": "high",
+          "description": "Reasoning effort for the agent (higher = more thorough, more tokens)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.138.0",
+    "typescript": "^5.6.0"
+  }
+}
