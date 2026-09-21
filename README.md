@@ -1,76 +1,77 @@
-# Visual Studio Code - Open Source ("Code - OSS")
-[![Feature Requests](https://img.shields.io/github/issues/microsoft/vscode/feature-request.svg)](https://github.com/microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Afeature-request+sort%3Areactions-%2B1-desc)
-[![Bugs](https://img.shields.io/github/issues/microsoft/vscode/bug.svg)](https://github.com/microsoft/vscode/issues?utf8=✓&q=is%3Aissue+is%3Aopen+label%3Abug)
+# Celiador
 
-## The Repository
+Celiador is an AI code editor — a **direct hard fork of [Visual Studio Code](https://github.com/microsoft/vscode)** (the `Code - OSS` source), with an AI agent (`celiador-ai`) built in. Think of the relationship to VS Code the way Cursor relates to it: we fork the source and edit it directly, rather than layering an extension on top of a stock install.
 
-This repository ("`Code - OSS`") is where we (Microsoft) develop the [Visual Studio Code](https://code.visualstudio.com) product together with the community. Not only do we work on code and issues here, but we also publish our [roadmap](https://github.com/microsoft/vscode/wiki/Roadmap), [monthly iteration plans](https://github.com/microsoft/vscode/wiki/Iteration-Plans), and our [endgame plans](https://github.com/microsoft/vscode/wiki/Running-the-Endgame). This source code is available to everyone under the standard [MIT license](https://github.com/microsoft/vscode/blob/main/LICENSE.txt).
+- **Base:** `microsoft/vscode` — tracked via the `upstream` git remote (see [Staying current](#staying-current)).
+- **Backend:** the AI layer talks to the Celiador daemon (`celiador.ai`), which lives in the separate [`celiador-daemon`](https://github.com/Cliefden/celiador-daemon) repo. Sign-in is unified Supabase auth; the daemon holds the shared LLM key.
+- **Extensions marketplace:** [Open VSX](https://open-vsx.org) (not the Microsoft Marketplace).
 
-## Visual Studio Code
+> This repo *is* the editor. The previous VSCodium build-orchestrator approach (`celiador-editor`) is retired to reference-only — a hard fork lets us edit editor core directly instead of maintaining a patch stack.
 
-<p align="center">
-  <img alt="VS Code in action" src="https://github.com/user-attachments/assets/56af271c-949d-454c-a3ea-16188c063414">
-</p>
+## Requirements (macOS, Apple Silicon)
 
-[Visual Studio Code](https://code.visualstudio.com) is a distribution of the `Code - OSS` repository with Microsoft-specific customizations released under a traditional [Microsoft product license](https://code.visualstudio.com/License/).
+| Tool | Version / note |
+|------|----------------|
+| Node | **24.18.0** (matches vscode's `.nvmrc`) — via [`fnm`](https://github.com/Schniz/fnm): `fnm exec --using 24.18.0 <cmd>` |
+| Xcode | `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer` is **required** for native-module (`node-gyp`) builds |
+| jq | any recent version |
 
-[Visual Studio Code](https://code.visualstudio.com) combines the simplicity of a code editor with what developers need for their core edit-build-debug cycle. It provides comprehensive code editing, navigation, and understanding support along with lightweight debugging, a rich extensibility model, and lightweight integration with existing tools.
+## Build
 
-Visual Studio Code is updated monthly with new features and bug fixes. You can download it for Windows, macOS, and Linux on the [Visual Studio Code website](https://code.visualstudio.com/Download). To get the latest releases every day, install the [Insiders build](https://code.visualstudio.com/insiders).
+```sh
+# 1. install dependencies (native modules build here — hence DEVELOPER_DIR)
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  fnm exec --using 24.18.0 npm install
 
-## Contributing
+# 2. package the desktop app
+DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+  fnm exec --using 24.18.0 npm run gulp vscode-darwin-arm64-min
+```
 
-There are many ways in which you can participate in this project, for example:
+The packaged app is written **one level up** from this repo (vscode's `buildRoot` is the parent dir):
 
-* [Submit bugs and feature requests](https://github.com/microsoft/vscode/issues), and help us verify them as they are checked in
-* Review [source code changes](https://github.com/microsoft/vscode/pulls)
-* Review the [documentation](https://github.com/microsoft/vscode-docs) and make pull requests for anything from typos to new content.
+```
+../VSCode-darwin-arm64/Celiador.app
+```
 
-If you are interested in fixing issues and contributing directly to the codebase, please see the document [How to Contribute](https://github.com/microsoft/vscode/wiki/How-to-Contribute), which covers the following:
+### Sign it (local runs)
 
-* [How to build and run from source](https://github.com/microsoft/vscode/wiki/How-to-Contribute)
-* [The development workflow, including debugging and running tests](https://github.com/microsoft/vscode/wiki/How-to-Contribute#debugging)
-* [Coding guidelines](https://github.com/microsoft/vscode/wiki/Coding-Guidelines)
-* [Submitting pull requests](https://github.com/microsoft/vscode/wiki/How-to-Contribute#pull-requests)
-* [Finding an issue to work on](https://github.com/microsoft/vscode/wiki/How-to-Contribute#where-to-contribute)
-* [Contributing to translations](https://aka.ms/vscodeloc)
+The build does not code-sign. Sign with a **stable named identity** — never ad-hoc (`codesign -s -`), or macOS re-prompts for the "Celiador Safe Storage" keychain item on every launch:
 
-## Feedback
+```sh
+codesign --force --deep --sign "Apple Development: <your identity>" \
+  ../VSCode-darwin-arm64/Celiador.app
+```
 
-* Ask a question on [Stack Overflow](https://stackoverflow.com/questions/tagged/vscode)
-* [Request a new feature](CONTRIBUTING.md)
-* Upvote [popular feature requests](https://github.com/microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Afeature-request+sort%3Areactions-%2B1-desc)
-* [File an issue](https://github.com/microsoft/vscode/issues)
-* Connect with the extension author community on [GitHub Discussions](https://github.com/microsoft/vscode-discussions/discussions) or [Slack](https://aka.ms/vscode-dev-community)
-* Follow [@code](https://x.com/code) and let us know what you think!
+On first launch, approve the "Celiador Safe Storage" keychain prompt once ("Always Allow"); it then persists across rebuilds.
 
-See our [wiki](https://github.com/microsoft/vscode/wiki/Feedback-Channels) for a description of each of these channels and information on some other available community-driven channels.
+## Layout
 
-## Related Projects
+- `extensions/celiador-ai/` — the built-in AI extension (chat + agent, wired to the daemon). A normal source extension; the vscode build packages its compiled `out/`.
+- `product.json` — Celiador branding (`ai.celiador.editor`, `celiador://` URL protocol, `.celiador` data dir), Open VSX gallery config.
+- `resources/darwin/code.icns` — the Celiador app icon.
 
-Many of the core components and extensions to VS Code live in their own repositories on GitHub. For example, the [node debug adapter](https://github.com/microsoft/vscode-node-debug) and the [mono debug adapter](https://github.com/microsoft/vscode-mono-debug) repositories are separate from each other. For a complete list, please visit the [Related Projects](https://github.com/microsoft/vscode/wiki/Related-Projects) page on our [wiki](https://github.com/microsoft/vscode/wiki).
+## Customizations vs upstream
 
-## Bundled Extensions
+Kept intentionally small so upstream merges stay cheap. Beyond branding + the bundled extension:
 
-VS Code includes a set of built-in extensions located in the [extensions](extensions) folder, including grammars and snippets for many languages. Extensions that provide rich language support (inline suggestions, Go to Definition) for a language have the suffix `language-features`. For example, the `json` extension provides coloring for `JSON` and the `json-language-features` extension provides rich language support for `JSON`.
+- **Open VSX** as the extension gallery, with signature verification relaxed so Open VSX extensions install.
+- **Issue reporter** points at this repo instead of `microsoft/vscode`.
+- **Onboarding walkthrough** disabled.
 
-## Development Container
+Deferred (larger, done as focused follow-ups): removing the built-in Copilot subsystem, custom UI font, stripping residual Microsoft branding strings.
 
-This repository includes a Visual Studio Code Dev Containers / GitHub Codespaces development container.
+## Staying current
 
-* For [Dev Containers](https://aka.ms/vscode-remote/download/containers), use the **Dev Containers: Clone Repository in Container Volume...** command, which creates a Docker volume for better disk I/O on macOS and Windows.
-  * If you already have VS Code and Docker installed, you can also click [here](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/microsoft/vscode) to get started. This will cause VS Code to automatically install the Dev Containers extension if needed, clone the source code into a container volume, and spin up a dev container for use.
+`upstream` points at `microsoft/vscode`. To pull a newer release:
 
-* For Codespaces, install the [GitHub Codespaces](https://marketplace.visualstudio.com/items?itemName=GitHub.codespaces) extension in VS Code, and use the **Codespaces: Create New Codespace** command.
+```sh
+git fetch upstream --tags
+git merge <tag>        # e.g. 1.139.0
+```
 
-Docker / the Codespace should have at least **4 cores and 6 GB of RAM (8 GB recommended)** to run a full build. See the [development container README](.devcontainer/README.md) for more information.
-
-## Code of Conduct
-
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/). For more information, see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+Keep core edits minimal and localized so these merges stay low-conflict.
 
 ## License
 
-Copyright (c) Microsoft Corporation. All rights reserved.
-
-Licensed under the [MIT](LICENSE.txt) license.
+MIT — see [`LICENSE.txt`](LICENSE.txt). Celiador is an independent fork and is not affiliated with or endorsed by Microsoft.
