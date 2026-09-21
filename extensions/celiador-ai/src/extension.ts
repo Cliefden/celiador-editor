@@ -20,7 +20,7 @@ function daemonConfig(): { url: string; token: string } {
 function agentConfig(): { provider: string; model: string; effort: string; autoApprove: boolean } {
   const cfg = vscode.workspace.getConfiguration("celiador");
   return {
-    provider: cfg.get<string>("provider") || "anthropic",
+    provider: cfg.get<string>("provider") || "daemon",
     model: cfg.get<string>("model") || "claude-opus-4-8",
     effort: cfg.get<string>("effort") || "high",
     autoApprove: cfg.get<boolean>("autoApproveEdits") ?? false,
@@ -203,7 +203,7 @@ async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ct
   } else {
     const apiKey = await getApiKey();
     if (!apiKey) {
-      emit({ type: "reply", text: "No Anthropic API key set. Run “Celiador: Set API Key” (OS keychain), set `celiador.apiKey`, or export ANTHROPIC_API_KEY — or switch `celiador.provider` to \"daemon\"." });
+      emit({ type: "reply", text: "`celiador.provider` is set to \"anthropic\" (bring-your-own-key, unsupported) but no key is set. Set `celiador.provider` back to \"daemon\" and sign in, or run “Celiador: Set API Key”." });
       return;
     }
     endpoint = ANTHROPIC_URL;
@@ -230,7 +230,15 @@ async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ct
 
     if (!res.ok || !res.body) {
       const t = await res.text().catch(() => "");
-      emit({ type: "reply", text: `${daemonMode ? "Daemon" : "Anthropic"} error ${res.status}: ${t.slice(0, 500)}` });
+      // The gateway reports quota and throttling as JSON `{ error }`; show that
+      // plainly rather than a raw status line and a blob of JSON.
+      let detail = t.slice(0, 500);
+      try {
+        const parsed = JSON.parse(t);
+        if (typeof parsed?.error === "string") detail = parsed.error;
+      } catch { /* not JSON — fall back to the raw body */ }
+      const prefix = res.status === 402 ? "Out of included usage" : `${daemonMode ? "Daemon" : "Anthropic"} error ${res.status}`;
+      emit({ type: "reply", text: `${prefix}: ${detail}` });
       return;
     }
 

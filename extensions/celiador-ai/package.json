@@ -85,18 +85,18 @@
         "celiador.token": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (`CELIADOR_AGENT_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** — your Supabase session is used instead."
+          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (the daemon's `CELIADOR_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** — your Supabase session is used instead."
         },
         "celiador.provider": {
           "type": "string",
-          "enum": ["anthropic", "daemon"],
-          "default": "anthropic",
-          "markdownDescription": "Where the agent runs. `anthropic`: call Claude directly (needs an API key). `daemon`: route through the Celiador daemon (`celiador.daemonUrl`) using `celiador.token` — no client-side API key; the daemon holds the credential."
+          "enum": ["daemon", "anthropic"],
+          "default": "daemon",
+          "markdownDescription": "Where the agent runs. `daemon` (default): route through the Celiador daemon (`celiador.daemonUrl`) using your signed-in account — no client-side API key, and your plan's included usage applies. `anthropic`: unsupported escape hatch that calls Claude directly with your own key; nothing is metered and no included usage applies."
         },
         "celiador.apiKey": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Anthropic API key for `anthropic` provider (fallback). Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage → this setting → `ANTHROPIC_API_KEY`."
+          "markdownDescription": "Anthropic API key for the unsupported `anthropic` provider. Billing, usage limits and support do not apply when you bring your own key. Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage → this setting → `ANTHROPIC_API_KEY`."
         },
         "celiador.autoApproveEdits": {
           "type": "boolean",
