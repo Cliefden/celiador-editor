@@ -21,7 +21,7 @@ function agentConfig(): { provider: string; model: string; effort: string; autoA
   const cfg = vscode.workspace.getConfiguration("celiador");
   return {
     provider: cfg.get<string>("provider") || "daemon",
-    model: cfg.get<string>("model") || "claude-opus-4-8",
+    model: cfg.get<string>("model") || "claude-opus-5",
     effort: cfg.get<string>("effort") || "high",
     autoApprove: cfg.get<boolean>("autoApproveEdits") ?? false,
   };

@@ -105,8 +105,8 @@
         },
         "celiador.model": {
           "type": "string",
-          "default": "claude-opus-4-8",
-          "description": "Claude model the agent uses."
+          "default": "claude-opus-5",
+          "description": "Claude model the agent uses. Only applies to the unsupported `anthropic` provider — in `daemon` mode the server picks the model per task."
         },
         "celiador.effort": {
           "type": "string",
