@@ -1,0 +1,22 @@
+{
+  "name": "celiador-defaults",
+  "displayName": "Celiador Defaults",
+  "description": "Ships Celiador's default settings — hides the built-in AI/chat surfaces so only the Celiador AI extension provides an LLM.",
+  "version": "1.0.0",
+  "publisher": "celiador",
+  "license": "MIT",
+  "engines": {
+    "vscode": "*"
+  },
+  "contributes": {
+    "configurationDefaults": {
+      "chat.disableAIFeatures": true,
+      "chat.agentHost.claudeAgent.enabled": false,
+      "chat.agentHost.codexAgent.enabled": false
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cliefden/celiador.git"
+  }
+}
