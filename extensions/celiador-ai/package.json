@@ -1,7 +1,7 @@
 {
   "name": "celiador-ai",
   "displayName": "Celiador AI",
-  "description": "Celiador's AI layer — chat and agent, wired to the Celiador daemon.",
+  "description": "Celiador's AI layer \u2014 provides the Celiador language model to chat, agent mode and inline edit.",
   "version": "0.0.2",
   "publisher": "celiador",
   "license": "MIT",
@@ -20,10 +20,16 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true,
-      "description": "The Celiador agent reads and edits files in your workspace; every write is confirmed before it is applied."
+      "description": "Celiador provides a language model to the editor's chat and agent features; file edits are made and confirmed by the editor, not by this extension."
     }
   },
   "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "celiador",
+        "displayName": "Celiador"
+      }
+    ],
     "commands": [
       {
         "command": "celiador.openChat",
@@ -51,24 +57,6 @@
         "category": "Celiador"
       }
     ],
-    "viewsContainers": {
-      "secondarySidebar": [
-        {
-          "id": "celiador",
-          "title": "Celiador",
-          "icon": "media/celiador.svg"
-        }
-      ]
-    },
-    "views": {
-      "celiador": [
-        {
-          "id": "celiador.chat",
-          "name": "Chat",
-          "type": "webview"
-        }
-      ]
-    },
     "configuration": {
       "title": "Celiador",
       "properties": {
@@ -85,34 +73,38 @@
         "celiador.token": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (the daemon's `CELIADOR_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** — your Supabase session is used instead."
+          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (the daemon's `CELIADOR_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** \u2014 your Supabase session is used instead."
         },
         "celiador.provider": {
           "type": "string",
-          "enum": ["daemon", "anthropic"],
+          "enum": [
+            "daemon",
+            "anthropic"
+          ],
           "default": "daemon",
-          "markdownDescription": "Where the agent runs. `daemon` (default): route through the Celiador daemon (`celiador.daemonUrl`) using your signed-in account — no client-side API key, and your plan's included usage applies. `anthropic`: unsupported escape hatch that calls Claude directly with your own key; nothing is metered and no included usage applies."
+          "markdownDescription": "Where the agent runs. `daemon` (default): route through the Celiador daemon (`celiador.daemonUrl`) using your signed-in account \u2014 no client-side API key, and your plan's included usage applies. `anthropic`: unsupported escape hatch that calls Claude directly with your own key; nothing is metered and no included usage applies."
         },
         "celiador.apiKey": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Anthropic API key for the unsupported `anthropic` provider. Billing, usage limits and support do not apply when you bring your own key. Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage → this setting → `ANTHROPIC_API_KEY`."
-        },
-        "celiador.autoApproveEdits": {
-          "type": "boolean",
-          "default": false,
-          "description": "Apply the agent's file writes without asking. When off (default), each write to a new/changed path requires confirmation."
+          "markdownDescription": "Anthropic API key for the unsupported `anthropic` provider. Billing, usage limits and support do not apply when you bring your own key. Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage \u2192 this setting \u2192 `ANTHROPIC_API_KEY`."
         },
         "celiador.model": {
           "type": "string",
           "default": "claude-opus-5",
-          "description": "Claude model the agent uses. Only applies to the unsupported `anthropic` provider — in `daemon` mode the server picks the model per task."
+          "description": "Claude model the agent uses. Only applies to the unsupported `anthropic` provider \u2014 in `daemon` mode the server picks the model per task."
         },
         "celiador.effort": {
           "type": "string",
-          "enum": ["low", "medium", "high", "xhigh", "max"],
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
           "default": "high",
-          "description": "Reasoning effort for the agent (higher = more thorough, more tokens)."
+          "description": "Reasoning effort for the unsupported `anthropic` provider (higher = more thorough, more tokens). In `daemon` mode the server decides."
         }
       }
     }
