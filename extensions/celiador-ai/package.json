@@ -55,6 +55,11 @@
         "command": "celiador.signOut",
         "title": "Celiador: Sign Out",
         "category": "Celiador"
+      },
+      {
+        "command": "celiador.manageBilling",
+        "title": "Celiador: Manage Billing",
+        "category": "Celiador"
       }
     ],
     "configuration": {

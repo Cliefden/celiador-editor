@@ -102,7 +102,9 @@ function toAnthropicTools(tools: readonly vscode.LanguageModelChatTool[] | undef
 export class CeliadorChatProvider implements vscode.LanguageModelChatProvider {
   constructor(
     private readonly auth: Auth,
-    private readonly secrets: vscode.SecretStorage
+    private readonly secrets: vscode.SecretStorage,
+    /** Called after a billed response so the balance indicator can refresh. */
+    private readonly onSpend?: () => void
   ) {}
 
   async provideLanguageModelChatInformation(
@@ -173,10 +175,16 @@ export class CeliadorChatProvider implements vscode.LanguageModelChatProvider {
       });
     }
     if (!res.ok || !res.body) {
-      throw new Error(await describeFailure(res));
+      const message = await describeFailure(res);
+      // LanguageModelError has no quota or upgrade cause — only NoPermissions,
+      // Blocked and NotFound — so this message is the entire affordance the
+      // user gets. It has to say what to do about it.
+      if (res.status === 402) throw vscode.LanguageModelError.NoPermissions(message);
+      throw new Error(message);
     }
 
     await this.pump(res.body, progress, token);
+    this.onSpend?.();
   }
 
   async provideTokenCount(
@@ -314,7 +322,7 @@ async function describeFailure(res: Response): Promise<string> {
   } catch {
     // not JSON — keep the raw body
   }
-  if (res.status === 402) return `Out of included usage: ${detail}`;
+  if (res.status === 402) return `${detail} Run "Celiador: Manage Billing" to add credits or change plan.`;
   if (res.status === 429) return `Rate limited: ${detail}`;
   return `Celiador request failed (${res.status}): ${detail}`;
 }

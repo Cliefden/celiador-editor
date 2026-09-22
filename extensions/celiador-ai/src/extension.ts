@@ -20,6 +20,57 @@ function daemonUrl(): string {
   return (cfg.get<string>("daemonUrl") || "https://celiador.ai").replace(/\/+$/, "");
 }
 
+interface Balance {
+  plan: string;
+  planLabel: string;
+  includedUsd: number;
+  spentUsd: number;
+  topUpUsd: number;
+  remainingUsd: number;
+  period: string;
+}
+
+/** GET /api/me — identity, plan and what is left. */
+async function fetchMe(): Promise<{ balance: Balance } | undefined> {
+  if (!auth) return undefined;
+  const cfg = vscode.workspace.getConfiguration("celiador");
+  const bearer = (await auth.isSignedIn()) ? await auth.getAccessToken() : cfg.get<string>("token") || "";
+  if (!bearer) return undefined;
+  try {
+    const res = await fetch(`${daemonUrl()}/api/me`, { headers: { Authorization: `Bearer ${bearer}` } });
+    if (!res.ok) return undefined;
+    return (await res.json()) as { balance: Balance };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Open a Stripe Checkout or Customer Portal session in the browser. */
+async function openBilling(path: "checkout" | "portal", body: Record<string, unknown>): Promise<void> {
+  if (!auth) return;
+  const cfg = vscode.workspace.getConfiguration("celiador");
+  const bearer = (await auth.isSignedIn()) ? await auth.getAccessToken() : cfg.get<string>("token") || "";
+  if (!bearer) {
+    void vscode.window.showWarningMessage("Sign in to Celiador first.");
+    return;
+  }
+  try {
+    const res = await fetch(`${daemonUrl()}/api/billing/${path}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = (await res.json()) as { url?: string; error?: string };
+    if (!res.ok || !payload.url) {
+      void vscode.window.showErrorMessage(`Billing unavailable: ${payload.error ?? res.status}`);
+      return;
+    }
+    await vscode.env.openExternal(vscode.Uri.parse(payload.url));
+  } catch (err: any) {
+    void vscode.window.showErrorMessage(`Billing unavailable: ${err?.message ?? err}`);
+  }
+}
+
 async function probeDaemon(): Promise<string> {
   const url = daemonUrl();
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -36,8 +87,51 @@ export function activate(context: vscode.ExtensionContext): void {
   secretStore = context.secrets;
   auth = new Auth(context.secrets);
 
+  // Remaining balance, kept visible rather than discovered at the moment of
+  // refusal — the live spend meter that replaced quote-before-run.
+  const balanceStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+  balanceStatus.command = "celiador.manageBilling";
+  const refreshBalance = async () => {
+    const me = await fetchMe();
+    if (!me) {
+      balanceStatus.hide();
+      return;
+    }
+    const { balance } = me;
+    balanceStatus.text = `$(credit-card) $${balance.remainingUsd.toFixed(2)}`;
+    balanceStatus.tooltip =
+      `Celiador ${balance.planLabel} — $${balance.remainingUsd.toFixed(2)} left ` +
+      `($${balance.spentUsd.toFixed(2)} of $${balance.includedUsd.toFixed(2)} included this period` +
+      `${balance.topUpUsd > 0 ? `, plus $${balance.topUpUsd.toFixed(2)} credits` : ""}).\nClick to manage billing.`;
+    balanceStatus.show();
+  };
+  context.subscriptions.push(balanceStatus);
+
   context.subscriptions.push(
-    vscode.lm.registerLanguageModelChatProvider(VENDOR, new CeliadorChatProvider(auth, context.secrets))
+    vscode.lm.registerLanguageModelChatProvider(
+      VENDOR,
+      new CeliadorChatProvider(auth, context.secrets, () => void refreshBalance())
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.manageBilling", async () => {
+      const me = await fetchMe();
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: "Add credits", id: "credits", detail: "One-off top-up — no subscription change" },
+          { label: "Change plan", id: "plan", detail: "Upgrade, downgrade or cancel" },
+          { label: "Refresh balance", id: "refresh" },
+        ],
+        { placeHolder: me ? `${me.balance.planLabel} — $${me.balance.remainingUsd.toFixed(2)} left` : "Celiador billing" }
+      );
+      if (!pick) return;
+      if (pick.id === "refresh") return void refreshBalance();
+      if (pick.id === "plan") return void openBilling("portal", {});
+      // Credit packs are configured server-side; ask for the plan checkout when
+      // there is no subscription yet, since the portal needs a customer first.
+      return void openBilling("checkout", me?.balance.plan === "free" ? { plan: "builder" } : {});
+    })
   );
 
   // Capture the Supabase OAuth / magic-link deep link (celiador://…/auth-callback).
@@ -141,8 +235,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     authStatus.show();
   };
-  context.subscriptions.push(authStatus, auth.onDidChange(() => void updateAuthStatus()));
+  context.subscriptions.push(
+    authStatus,
+    auth.onDidChange(() => {
+      void updateAuthStatus();
+      void refreshBalance();
+    })
+  );
   void updateAuthStatus();
+  void refreshBalance();
 }
 
 export function deactivate(): void {
