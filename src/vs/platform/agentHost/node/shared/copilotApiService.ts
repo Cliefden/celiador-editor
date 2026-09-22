@@ -4,7 +4,23 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type Anthropic from '@anthropic-ai/sdk';
-import { CAPIClient, RequestType, type CCAModel, type IExtensionInformation } from '@vscode/copilot-api';
+import type { CAPIClient, CCAModel, IExtensionInformation } from '@vscode/copilot-api';
+
+/**
+ * `@vscode/copilot-api` is GitHub-proprietary and must not ship in a
+ * distributed build, so it is a devDependency. This module is constructed at
+ * agent-host bootstrap, so a static import would fail at load; every use of
+ * the package is behind an async call, so it loads on demand instead. In a
+ * Celiador build that demand never arrives — the Copilot provider path is
+ * dead — and if the package is absent the provider simply fails, which is the
+ * same outcome as today.
+ */
+type CopilotApiModule = typeof import('@vscode/copilot-api');
+let copilotApiModule: Promise<CopilotApiModule> | undefined;
+function loadCopilotApi(): Promise<CopilotApiModule> {
+	copilotApiModule ??= import('@vscode/copilot-api');
+	return copilotApiModule;
+}
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { getDevDeviceId, getMachineId } from '../../../../base/node/id.js';
 import { getInternalOrg, isInternalAccount } from '../../../assignment/common/assignment.js';
@@ -580,7 +596,7 @@ export class CopilotApiService implements ICopilotApiService {
 				suppressIntegrationId: options?.suppressIntegrationId,
 				signal: options?.signal,
 			},
-			{ type: RequestType.Models },
+			{ type: (await loadCopilotApi()).RequestType.Models },
 		);
 
 		if (!response.ok) {
@@ -628,7 +644,7 @@ export class CopilotApiService implements ICopilotApiService {
 				body,
 				signal: options?.signal,
 			},
-			{ type: RequestType.ChatResponses },
+			{ type: (await loadCopilotApi()).RequestType.ChatResponses },
 		);
 
 		this._logService.info(`[CopilotApiService] responses status=${response.status}, requestId=${requestId}`);
@@ -676,7 +692,7 @@ export class CopilotApiService implements ICopilotApiService {
 				body,
 				signal: options?.signal,
 			},
-			{ type: RequestType.ChatCompletions },
+			{ type: (await loadCopilotApi()).RequestType.ChatCompletions },
 		);
 
 		if (!response.ok) {
@@ -816,7 +832,7 @@ export class CopilotApiService implements ICopilotApiService {
 				body,
 				signal: options?.signal,
 			},
-			{ type: RequestType.ChatMessages },
+			{ type: (await loadCopilotApi()).RequestType.ChatMessages },
 		);
 		if (!response.ok) {
 			if (response.status === 401 || response.status === 403) {
@@ -909,7 +925,7 @@ export class CopilotApiService implements ICopilotApiService {
 	private async _buildClientForToken(githubToken: string): Promise<ICachedClient> {
 		const { extensionInfo, userUrl } = await this._getCapiBase();
 		const fetch = this._fetch;
-		const capiClient = new CAPIClient(extensionInfo, COPILOT_LICENSE_AGREEMENT, {
+		const capiClient = new (await loadCopilotApi()).CAPIClient(extensionInfo, COPILOT_LICENSE_AGREEMENT, {
 			fetch: (url, options) => fetch(url, {
 				method: options.method ?? 'GET',
 				headers: options.headers,
