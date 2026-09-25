@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { Auth } from "./auth";
+import { SessionRelay } from "./relay";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -292,9 +293,9 @@ async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ct
     const results: any[] = [];
     for (const tu of toolUses) {
       if (signal.aborted) return;
-      emit({ type: "tool", name: tu.name, input: tu.input });
+      emit({ type: "tool", name: tu.name, input: tu.input, id: tu.id });
       const r = await execTool(tu.name, tu.input, ctx);
-      emit({ type: "toolResult", name: tu.name, ok: !r.isError });
+      emit({ type: "toolResult", name: tu.name, ok: !r.isError, id: tu.id });
       results.push({ type: "tool_result", tool_use_id: tu.id, content: r.text, is_error: r.isError });
     }
     messages.push({ role: "user", content: results });
@@ -308,60 +309,118 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
   private messages: any[] = [];
   private controller: AbortController | undefined;
   private running = false;
+  private view: vscode.WebviewView | undefined;
+
+  constructor(private readonly relay: SessionRelay) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
+    this.view = webviewView;
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = this.html(webviewView.webview);
-    const emit: Emit = (msg) => webviewView.webview.postMessage(msg);
 
     webviewView.webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === "send") {
-        const text = String(msg.text || "").trim();
-        if (!text || this.running) return;
-        const root = workspaceRoot();
-        if (!root) { emit({ type: "reply", text: "Open a folder first — the agent works on files in your workspace." }); return; }
-
-        this.running = true;
-        emit({ type: "running", value: true });
-        this.controller = new AbortController();
-        this.messages.push({ role: "user", content: text });
-
-        let approveAll = false;
-        const { autoApprove } = agentConfig();
-        const ctx: ToolCtx = {
-          root,
-          changed: new Set<string>(),
-          ensureWrite: async (rel) => {
-            if (autoApprove || approveAll) return true;
-            const choice = await vscode.window.showWarningMessage(
-              `Celiador wants to write:\n${rel}`,
-              { modal: true, detail: "Applied to your working tree — review it in source control." },
-              "Allow",
-              "Allow all in this task"
-            );
-            if (choice === "Allow all in this task") { approveAll = true; return true; }
-            return choice === "Allow";
-          },
-        };
-
-        try {
-          await runAgentTurn(this.messages, emit, this.controller.signal, ctx);
-        } catch (err: any) {
-          if (this.controller.signal.aborted) emit({ type: "reply", text: "(Stopped.)" });
-          else emit({ type: "reply", text: `Error: ${err?.message ?? err}` });
-        } finally {
-          if (ctx.changed.size) emit({ type: "reply", text: `Changed ${ctx.changed.size} file(s): ${[...ctx.changed].join(", ")}` });
-          this.running = false;
-          this.controller = undefined;
-          emit({ type: "running", value: false });
-          emit({ type: "done" });
-        }
+        await this.runTask(String(msg.text || "").trim());
       } else if (msg?.type === "stop") {
-        this.controller?.abort();
+        this.cancel();
       } else if (msg?.type === "reset") {
-        if (!this.running) this.messages = [];
+        if (!this.running) {
+          this.messages = [];
+          this.relay.reset();
+        }
       }
     });
+  }
+
+  /** Abort the in-flight run (from the Stop button or a remote cancel). */
+  cancel(): void {
+    this.controller?.abort();
+  }
+
+  /** Start a task from a remote (phone) instruction — mirrors a local send. */
+  async runFromRemote(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed || this.running) return;
+    this.view?.webview.postMessage({ type: "user", text: trimmed });
+    await this.runTask(trimmed);
+  }
+
+  /** Post a message to the webview (if open) and mirror it to the relay. */
+  private emit: Emit = (msg) => {
+    this.view?.webview.postMessage(msg);
+    this.relayPublish(msg);
+  };
+
+  /** Translate a webview message into a session-log event for watchers. */
+  private relayPublish(msg: any): void {
+    switch (msg?.type) {
+      case "delta": this.relay.publish({ kind: "delta", text: msg.text }); break;
+      case "tool": this.relay.publish({ kind: "tool", callId: msg.id ?? "", name: msg.name, input: msg.input }); break;
+      case "toolResult": this.relay.publish({ kind: "toolResult", callId: msg.id ?? "", ok: msg.ok }); break;
+      case "reply": this.relay.publish({ kind: "message", role: "assistant", text: msg.text }); break;
+      case "running": if (msg.value) this.relay.publish({ kind: "state", state: "running" }); break;
+      case "done": this.relay.publish({ kind: "state", state: "done" }); this.relay.publish({ kind: "done" }); break;
+    }
+  }
+
+  private async runTask(text: string): Promise<void> {
+    if (!text || this.running) return;
+    const root = workspaceRoot();
+    if (!root) { this.emit({ type: "reply", text: "Open a folder first — the agent works on files in your workspace." }); return; }
+
+    this.running = true;
+    this.controller = new AbortController();
+    // Create/attach the relay session (best-effort) before the first event so
+    // the phone sees the run from its start.
+    await this.relay.start(text);
+    this.emit({ type: "running", value: true });
+    this.messages.push({ role: "user", content: text });
+
+    let approveAll = false;
+    const { autoApprove } = agentConfig();
+    const ctx: ToolCtx = {
+      root,
+      changed: new Set<string>(),
+      ensureWrite: async (rel) => {
+        if (autoApprove || approveAll) return true;
+        // Ask both the desktop (modal) and the phone (relay); first wins.
+        const requestId = this.relay.newRequestId();
+        this.relay.publish({ kind: "approval", requestId, approvalKind: "write_file", path: rel });
+        this.relay.publish({ kind: "state", state: "awaiting" });
+        const local = (async () => {
+          const choice = await vscode.window.showWarningMessage(
+            `Celiador wants to write:\n${rel}`,
+            { modal: true, detail: "Applied to your working tree — review it in source control." },
+            "Allow",
+            "Allow all in this task"
+          );
+          if (choice === "Allow all in this task") { approveAll = true; return true; }
+          return choice === "Allow";
+        })();
+        const ok = this.relay.active ? await Promise.race([local, this.relay.waitForApproval(requestId)]) : await local;
+        this.relay.clearApproval(requestId);
+        this.relay.publish({ kind: "state", state: "running" });
+        return ok;
+      },
+    };
+
+    try {
+      await runAgentTurn(this.messages, this.emit, this.controller.signal, ctx);
+    } catch (err: any) {
+      if (this.controller.signal.aborted) {
+        this.emit({ type: "reply", text: "(Stopped.)" });
+        this.relay.publish({ kind: "state", state: "cancelled" });
+      } else {
+        this.emit({ type: "reply", text: `Error: ${err?.message ?? err}` });
+        this.relay.publish({ kind: "state", state: "error" });
+      }
+    } finally {
+      if (ctx.changed.size) this.emit({ type: "reply", text: `Changed ${ctx.changed.size} file(s): ${[...ctx.changed].join(", ")}` });
+      this.running = false;
+      this.controller = undefined;
+      this.emit({ type: "running", value: false });
+      this.emit({ type: "done" });
+    }
   }
 
   private html(webview: vscode.Webview): string {
@@ -425,7 +484,8 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
   window.addEventListener('message', (event) => {
     const m = event.data;
-    if (m.type === 'delta') { if (!current) current = bubble('celiador'); current.textContent += m.text; log.scrollTop = log.scrollHeight; }
+    if (m.type === 'user') { bubble('you').textContent = m.text; current = null; }
+    else if (m.type === 'delta') { if (!current) current = bubble('celiador'); current.textContent += m.text; log.scrollTop = log.scrollHeight; }
     else if (m.type === 'tool') { line('tool', '→ ' + m.name + '(' + (m.input && (m.input.path || m.input.dir) || '') + ')'); current = null; }
     else if (m.type === 'reply') { bubble('celiador').textContent = m.text; current = null; }
     else if (m.type === 'running') { sendBtn.disabled = m.value; input.disabled = m.value; stopBtn.style.display = m.value ? 'block' : 'none'; }
@@ -441,7 +501,25 @@ export function activate(context: vscode.ExtensionContext): void {
   console.log("[celiador-ai] activated");
   secretStore = context.secrets;
   auth = new Auth(context.secrets);
-  const provider = new CeliadorChatViewProvider();
+
+  // Relay: makes a local agent run observable/controllable from the companion
+  // phone. The token is the signed-in Supabase access token, falling back to the
+  // shared-secret setting; undefined → signed out, so the run stays local-only.
+  const relay = new SessionRelay(
+    () => daemonConfig().url,
+    async () => {
+      try {
+        if (auth && (await auth.isSignedIn())) return await auth.getAccessToken();
+      } catch {
+        /* fall through to shared token */
+      }
+      return daemonConfig().token || undefined;
+    }
+  );
+  const provider = new CeliadorChatViewProvider(relay);
+  relay.onInstruct = (text) => void provider.runFromRemote(text);
+  relay.onCancel = () => provider.cancel();
+  context.subscriptions.push({ dispose: () => relay.dispose() });
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("celiador.chat", provider));
 
   // Capture the Supabase OAuth / magic-link deep link (celiador://…/auth-callback).
