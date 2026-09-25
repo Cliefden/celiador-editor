@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { Auth } from "./auth";
 import { SessionRelay } from "./relay";
+import { DaemonApi } from "./api";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -598,6 +599,63 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("celiador.checkConnection", async () => {
       try { void vscode.window.showInformationMessage(await probeDaemon()); }
       catch (err: any) { void vscode.window.showErrorMessage(`Celiador daemon unreachable: ${err?.message ?? err}`); }
+    })
+  );
+
+  // App data (profile + chat history) served by the daemon over the shared JWT.
+  const api = new DaemonApi(auth, () => daemonConfig().url);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.account", async () => {
+      if (!auth || !(await auth.isSignedIn())) {
+        void vscode.window.showInformationMessage("Not signed in. Run “Celiador: Sign In”.");
+        return;
+      }
+      try {
+        const p = await api.getProfile();
+        void vscode.window.showInformationMessage(
+          `Celiador — ${p.display_name ?? p.email ?? p.id} · plan: ${p.plan}`
+        );
+      } catch (err: any) {
+        void vscode.window.showErrorMessage(`Couldn't load your profile: ${err?.message ?? err}`);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.pastChats", async () => {
+      if (!auth || !(await auth.isSignedIn())) {
+        void vscode.window.showInformationMessage("Sign in to see your Celiador chat history.");
+        return;
+      }
+      try {
+        const chats = await api.listChats();
+        if (chats.length === 0) {
+          void vscode.window.showInformationMessage("No past chats yet.");
+          return;
+        }
+        const pick = await vscode.window.showQuickPick(
+          chats.map((c) => ({
+            label: c.title || "Untitled task",
+            description: new Date(c.updated_at).toLocaleString(),
+            detail: c.status,
+            id: c.id,
+          })),
+          { placeHolder: "Open a past Celiador chat" }
+        );
+        if (!pick) return;
+        const { chat, messages } = await api.getChat(pick.id);
+        const body = messages
+          .map((m) => `### ${m.role}\n\n${(m.content as { text?: string })?.text ?? ""}`)
+          .join("\n\n");
+        const doc = await vscode.workspace.openTextDocument({
+          language: "markdown",
+          content: `# ${chat.title ?? "Chat"}\n\n${body || "_No messages._"}`,
+        });
+        await vscode.window.showTextDocument(doc, { preview: true });
+      } catch (err: any) {
+        void vscode.window.showErrorMessage(`Couldn't load chats: ${err?.message ?? err}`);
+      }
     })
   );
 

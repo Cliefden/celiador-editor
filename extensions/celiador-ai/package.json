@@ -49,6 +49,16 @@
         "command": "celiador.signOut",
         "title": "Celiador: Sign Out",
         "category": "Celiador"
+      },
+      {
+        "command": "celiador.account",
+        "title": "Celiador: Account",
+        "category": "Celiador"
+      },
+      {
+        "command": "celiador.pastChats",
+        "title": "Celiador: Past Chats",
+        "category": "Celiador"
       }
     ],
     "viewsContainers": {
