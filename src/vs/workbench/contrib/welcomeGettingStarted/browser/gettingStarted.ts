@@ -925,7 +925,7 @@ export class GettingStartedPage extends EditorPane {
 
 		const header = $('.header', {},
 			$('h1.product-name.caption', {}, this.productService.nameLong),
-			$('p.subtitle.description', {}, localize({ key: 'gettingStarted.editingEvolved', comment: ['Shown as subtitle on the Welcome page.'] }, "Editing evolved"))
+			$('p.subtitle.description', {}, localize({ key: 'gettingStarted.celiadorTagline', comment: ['Shown as subtitle on the Welcome page.'] }, "The AI editor for people who ship."))
 		);
 
 		const leftColumn = $('.categories-column.categories-column-left', {},);

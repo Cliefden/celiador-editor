@@ -4,15 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $ } from '../../../../base/browser/dom.js';
-import { VSCODE_LOGO_PATH } from './vscodeLogoPath.js';
+import { CELIADOR_LOGO_PATH } from './celiadorLogoPath.js';
 
 /**
- * VS Code logo "fish" used by the Agents window aquarium. Each fish is a small
+ * Celiador logo "fish" used by the Agents window aquarium. Each fish is a small
  * SVG element styled with `color:` so the silhouette inherits via `currentColor`,
  * with animated body strips providing the swimming motion.
  */
 
-/** The three VS Code release channel colors used as fish "species". */
+/** The three Celiador brand colors used as fish "species". */
 export const enum FishSpecies {
 	Stable = 'stable',
 	Insiders = 'insiders',
@@ -20,9 +20,9 @@ export const enum FishSpecies {
 }
 
 const SPECIES_COLOR: Record<FishSpecies, string> = {
-	[FishSpecies.Stable]: '#007ACC',
-	[FishSpecies.Insiders]: '#24bfa5',
-	[FishSpecies.Exploration]: '#E04F00',
+	[FishSpecies.Stable]: '#2F6BFF',
+	[FishSpecies.Insiders]: '#38C6F4',
+	[FishSpecies.Exploration]: '#8B4DFF',
 };
 
 /** Pick a random species, weighted Stable > Insiders > Exploration. */
@@ -182,7 +182,7 @@ const BODY_X_END = 90;
 
 /**
  * Lazily-built shared SVG element holding both the strip clipPath defs AND
- * a single `<symbol>` containing the VS Code logo path. All fish reference
+ * a single `<symbol>` containing the Celiador logo path. All fish reference
  * these via `clip-path: url(#…)` and `<use href="#…">` instead of duplicating
  * the path data per strip per fish (which previously caused 50 fish * 10
  * strips = 500 path parses on every aquarium activation).
@@ -243,7 +243,7 @@ function createVSCodeLogoSymbol(): SVGSymbolElement {
 	symbol.setAttribute('overflow', 'visible');
 
 	const logoPath = $.SVG<SVGPathElement>('path');
-	logoPath.setAttribute('d', VSCODE_LOGO_PATH);
+	logoPath.setAttribute('d', CELIADOR_LOGO_PATH);
 	logoPath.setAttribute('fill', 'currentColor');
 	logoPath.setAttribute('fill-rule', 'evenodd');
 	symbol.appendChild(logoPath);
@@ -253,7 +253,7 @@ function createVSCodeLogoSymbol(): SVGSymbolElement {
 
 /**
  * Build the inline SVG element tree for a fish:
- *   - VS Code logo body, sliced into N vertical strips that each oscillate in
+ *   - Celiador logo body, sliced into N vertical strips that each oscillate in
  *     Y with a phase-offset CSS animation (the "swimming" sine wave)
  *
  * Colors come from `currentColor` on the parent element. Built without
@@ -268,7 +268,7 @@ function buildFishSvg(targetDocument: Document): SVGSVGElement {
 	const svg = $.SVG<SVGSVGElement>('svg');
 	svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
 	svg.setAttribute('focusable', 'false');
-	// viewBox 0..96 matches the original VS Code icon.
+	// viewBox 0..96 matches the Celiador emblem.
 	svg.setAttribute('viewBox', '0 0 96 96');
 	svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 	// Tell the rasterizer to optimize for visual quality, not speed: smoother

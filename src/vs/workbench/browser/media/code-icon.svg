@@ -1,1 +1,10 @@
-<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><style>.st0{fill:#f6f6f6;fill-opacity:0}.st1{fill:#fff}.st2{fill:#167abf}</style><path class="st0" d="M1024 1024H0V0h1024v1024z"/><path class="st1" d="M1024 85.333v853.333H0V85.333h1024z"/><path class="st2" d="M0 85.333h298.667v853.333H0V85.333zm1024 0v853.333H384V85.333h640zm-554.667 160h341.333v-64H469.333v64zm341.334 533.334H469.333v64h341.333l.001-64zm128-149.334H597.333v64h341.333l.001-64zm0-149.333H597.333v64h341.333l.001-64zm0-149.333H597.333v64h341.333l.001-64z"/></svg>
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="celiadorLeft" x1="12" y1="30" x2="47" y2="80" gradientUnits="userSpaceOnUse"><stop stop-color="#38C6F4"/><stop offset="1" stop-color="#2F6BFF"/></linearGradient>
+<linearGradient id="celiadorRight" x1="49" y1="16" x2="86" y2="76" gradientUnits="userSpaceOnUse"><stop stop-color="#C77DFF"/><stop offset="1" stop-color="#5B2CF5"/></linearGradient>
+<radialGradient id="celiadorOrb" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(50.5 46) scale(10.5)"><stop stop-color="#FFFFFF"/><stop offset="0.45" stop-color="#9FE3FF"/><stop offset="1" stop-color="#7C6BFF"/></radialGradient>
+</defs>
+<path d="M47 10.8L12.6 37.5Q10 39.5 10 42.8V53.2Q10 56.5 12.6 58.5L47 85.2V69.2L22 48L47 26.8Z" fill="url(#celiadorLeft)"/>
+<path d="M49 10.8L83.4 37.5Q86 39.5 86 42.8V53.2Q86 56.5 83.4 58.5L49 85.2V69.2L74 48L49 26.8Z" fill="url(#celiadorRight)"/>
+<path d="M48 38.5A9.5 9.5 0 1 0 48 57.5A9.5 9.5 0 1 0 48 38.5Z" fill="url(#celiadorOrb)"/>
+</svg>
