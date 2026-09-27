@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { spawnSync } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import { getChromiumSysroot, getVSCodeSysroot } from './debian/install-sysroot.ts';
 import { generatePackageDeps as generatePackageDepsDebian } from './debian/calculate-deps.ts';
@@ -63,15 +64,18 @@ export async function getDependencies(packageType: 'deb' | 'rpm', buildDir: stri
 	// Add chrome sandbox and crashpad handler.
 	files.push(path.join(buildDir, 'chrome-sandbox'));
 	files.push(path.join(buildDir, 'chrome_crashpad_handler'));
+	// The tunnel CLI is only present when it was built/downloaded separately
+	// (Microsoft's product pipeline); OSS builds such as Celiador's do not ship it.
+	const existingFiles = files.filter(file => fs.existsSync(file));
 
 	// Generate the dependencies.
 	let dependencies: Set<string>[];
 	if (packageType === 'deb') {
 		const chromiumSysroot = await getChromiumSysroot(arch as DebianArchString);
 		const vscodeSysroot = await getVSCodeSysroot(arch as DebianArchString);
-		dependencies = generatePackageDepsDebian(files, arch as DebianArchString, chromiumSysroot, vscodeSysroot);
+		dependencies = generatePackageDepsDebian(existingFiles, arch as DebianArchString, chromiumSysroot, vscodeSysroot);
 	} else {
-		dependencies = generatePackageDepsRpm(files);
+		dependencies = generatePackageDepsRpm(existingFiles);
 	}
 
 	// Merge all the dependencies.
