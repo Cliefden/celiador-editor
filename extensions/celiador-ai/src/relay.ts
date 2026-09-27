@@ -22,12 +22,20 @@ const RECONNECT_MS = 1500;
 
 /** Kinds that should reach the phone immediately rather than wait for a flush. */
 const URGENT = new Set(["approval", "question", "state", "done", "error"]);
+/** Delivery attempts per batch before it's dropped (relay is best-effort). */
+const MAX_ATTEMPTS = 3;
 
 export class SessionRelay {
   private sessionId: string | undefined;
   private lastState: string | undefined;
   private buffer: RelayEvent[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Flushes run strictly one after another: the daemon assigns `seq` in arrival
+   * order, so two concurrent POSTs (timer + urgent) could land a terminal
+   * `state` before the last deltas.
+   */
+  private flushChain: Promise<void> = Promise.resolve();
   private commandAbort: AbortController | undefined;
   private readonly approvals = new Map<string, (ok: boolean) => void>();
 
@@ -95,7 +103,7 @@ export class SessionRelay {
 
   /** End the current session locally (next task starts a new one). */
   reset(): void {
-    void this.flush();
+    void this.flush(); // captures the current sessionId synchronously before it's cleared
     this.commandAbort?.abort();
     this.commandAbort = undefined;
     this.sessionId = undefined;
@@ -111,25 +119,46 @@ export class SessionRelay {
     return { Authorization: `Bearer ${token}`, "content-type": "application/json" };
   }
 
-  private async flush(): Promise<void> {
+  /**
+   * Take the buffered events (synchronously, together with the session they
+   * belong to) and queue their delivery behind any in-flight flush.
+   */
+  private flush(): Promise<void> {
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = undefined;
     }
-    if (!this.sessionId || this.buffer.length === 0) return;
+    const sessionId = this.sessionId;
+    if (!sessionId || this.buffer.length === 0) return this.flushChain;
     const batch = this.buffer;
     this.buffer = [];
-    const token = await this.getToken().catch(() => undefined);
-    if (!token) return;
-    try {
-      await fetch(`${this.getUrl()}/api/sessions/${this.sessionId}/events`, {
-        method: "POST",
-        headers: this.headers(token),
-        body: JSON.stringify(batch),
-      });
-    } catch {
-      /* drop — best-effort */
+    this.flushChain = this.flushChain.then(() => this.deliver(sessionId, batch));
+    return this.flushChain;
+  }
+
+  /** POST one batch, retrying transient failures (network, 401 after refresh, 5xx/429). */
+  private async deliver(sessionId: string, batch: RelayEvent[]): Promise<void> {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const token = await this.getToken().catch(() => undefined);
+      if (!token) return; // signed out — nothing to deliver to
+      try {
+        const res = await fetch(`${this.getUrl()}/api/sessions/${sessionId}/events`, {
+          method: "POST",
+          headers: this.headers(token),
+          body: JSON.stringify(batch),
+        });
+        if (res.ok) return;
+        // 4xx other than auth/rate-limit won't succeed on retry (bad event, unknown session).
+        if (res.status !== 401 && res.status !== 429 && res.status < 500) {
+          console.warn(`[celiador-ai] relay dropped ${batch.length} event(s): HTTP ${res.status}`);
+          return;
+        }
+      } catch {
+        /* network — retry */
+      }
+      if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 500 * attempt));
     }
+    console.warn(`[celiador-ai] relay dropped ${batch.length} event(s) after ${MAX_ATTEMPTS} attempts`);
   }
 
   private openCommands(id: string): void {
@@ -180,7 +209,8 @@ export class SessionRelay {
   }
 
   private handleCommand(cmd: { kind?: string; text?: string; requestId?: string }): void {
-    if (cmd.kind === "instruct" && typeof cmd.text === "string") {
+    if ((cmd.kind === "instruct" || cmd.kind === "answer") && typeof cmd.text === "string") {
+      // An answer to an end-of-turn question is just the next instruction.
       this.onInstruct?.(cmd.text);
     } else if (cmd.kind === "cancel") {
       this.onCancel?.();
@@ -191,7 +221,6 @@ export class SessionRelay {
         resolve(cmd.kind === "approve");
       }
     }
-    // "answer" has no editor-side question flow yet.
   }
 
   private backoff(ac: AbortController): Promise<void> {

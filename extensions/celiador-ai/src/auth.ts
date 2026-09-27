@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { resolveDaemonUrl } from "./productConfig";
 
 // Dependency-free Supabase/GoTrue client for the editor. Mirrors the native
 // iOS/macOS client (apps/apple/Shared/Api.swift): password / signup / magic-link /
@@ -28,8 +29,19 @@ function jwtEmail(token: string): string | undefined {
   }
 }
 
+/** How long a started magic-link / OAuth sign-in may take to come back. */
+const PENDING_SIGNIN_MS = 30 * 60 * 1000;
+
 export class Auth {
   private cached: Session | null | undefined;
+  /** In-flight refresh, shared so concurrent 401s don't rotate the refresh token twice. */
+  private refreshing: Promise<Session> | undefined;
+  /**
+   * When this editor last started a magic-link / GitHub sign-in. A callback deep
+   * link is only accepted while one is pending — otherwise any page could open
+   * celiador://…/auth-callback#access_token=… and silently swap the account.
+   */
+  private pendingSignInAt = 0;
   private supaConfig: { base: string; anonKey: string } | undefined;
   private readonly onChange = new vscode.EventEmitter<void>();
   /** Fires whenever the signed-in state changes (sign in/out/refresh). */
@@ -38,8 +50,7 @@ export class Auth {
   constructor(private readonly secrets: vscode.SecretStorage) {}
 
   private daemonUrl(): string {
-    const cfg = vscode.workspace.getConfiguration("celiador");
-    return (cfg.get<string>("daemonUrl") || "https://celiador.ai").replace(/\/+$/, "");
+    return resolveDaemonUrl();
   }
 
   /** Resolve the Supabase base URL + anon key (setting override → /api/config). */
@@ -99,6 +110,7 @@ export class Auth {
 
   async sendMagicLink(email: string): Promise<void> {
     const { base, anonKey } = await this.supa();
+    this.pendingSignInAt = Date.now();
     const url = `${base}/auth/v1/otp?redirect_to=${encodeURIComponent(AUTH_REDIRECT)}`;
     const res = await fetch(url, {
       method: "POST",
@@ -114,6 +126,7 @@ export class Auth {
   async signInWithGitHub(): Promise<void> {
     const { base } = await this.supa();
     const url = `${base}/auth/v1/authorize?provider=github&redirect_to=${encodeURIComponent(AUTH_REDIRECT)}`;
+    this.pendingSignInAt = Date.now();
     await vscode.env.openExternal(vscode.Uri.parse(url));
   }
 
@@ -123,6 +136,17 @@ export class Auth {
     const access_token = params.get("access_token");
     const refresh_token = params.get("refresh_token");
     if (!access_token || !refresh_token) return false;
+    if (Date.now() - this.pendingSignInAt > PENDING_SIGNIN_MS) {
+      // Not started here (or long expired) — possible login CSRF. Ask before switching.
+      const email = jwtEmail(access_token) ?? "an unknown account";
+      const pick = await vscode.window.showWarningMessage(
+        `A sign-in link wants to sign this editor in as ${email}. You didn't start a sign-in here recently.`,
+        { modal: true },
+        "Sign In"
+      );
+      if (pick !== "Sign In") return false;
+    }
+    this.pendingSignInAt = 0;
     const now = Math.floor(Date.now() / 1000);
     await this.store({
       access_token,
@@ -162,10 +186,17 @@ export class Auth {
     return (await this.load())?.email;
   }
 
-  private async refresh(s: Session): Promise<Session> {
-    const next = this.toSession(await this.gotrue("token?grant_type=refresh_token", { refresh_token: s.refresh_token }));
-    await this.store(next);
-    return next;
+  private refresh(s: Session): Promise<Session> {
+    if (!this.refreshing) {
+      this.refreshing = (async () => {
+        const next = this.toSession(await this.gotrue("token?grant_type=refresh_token", { refresh_token: s.refresh_token }));
+        await this.store(next);
+        return next;
+      })().finally(() => {
+        this.refreshing = undefined;
+      });
+    }
+    return this.refreshing;
   }
 
   /** Force a refresh (used after a daemon 401). Returns false if not signed in. */

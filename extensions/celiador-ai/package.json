@@ -19,8 +19,18 @@
   ],
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": true,
-      "description": "The Celiador agent reads and edits files in your workspace; every write is confirmed before it is applied."
+      "supported": "limited",
+      "description": "In Restricted Mode, workspace settings cannot change where Celiador sends your credentials or prompts (daemon/sign-in URLs, provider, API key, Jev) or turn on auto-approved writes. Unless `celiador.autoApproveEdits` is enabled in your user settings, every write is confirmed before it is applied.",
+      "restrictedConfigurations": [
+        "celiador.daemonUrl",
+        "celiador.supabaseUrl",
+        "celiador.token",
+        "celiador.provider",
+        "celiador.apiKey",
+        "celiador.autoApproveEdits",
+        "celiador.model",
+        "celiador.jev.enabled"
+      ]
     }
   },
   "contributes": {
@@ -38,6 +48,11 @@
       {
         "command": "celiador.setApiKey",
         "title": "Celiador: Set API Key",
+        "category": "Celiador"
+      },
+      {
+        "command": "celiador.setJevApiKey",
+        "title": "Celiador: Set Jev API Key",
         "category": "Celiador"
       },
       {
@@ -84,45 +99,75 @@
       "properties": {
         "celiador.daemonUrl": {
           "type": "string",
-          "default": "https://celiador.ai",
-          "description": "Base URL of the Celiador daemon the AI layer talks to."
+          "default": "",
+          "markdownDescription": "Base URL of the Celiador daemon the AI layer talks to. Leave empty to use this build's default (`celiadorDaemonUrl` in `product.json`): prod → `https://celiador.ai`, staging → `https://staging.celiador.ai`, dev → `http://localhost:4661`.",
+          "scope": "application"
         },
         "celiador.supabaseUrl": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Override the Supabase/GoTrue base URL used for sign-in. Leave empty to use the value from the daemon's `GET /api/config` (self-hosted defaults to the daemon URL)."
+          "markdownDescription": "Override the Supabase/GoTrue base URL used for sign-in. Leave empty to use the value from the daemon's `GET /api/config` (self-hosted defaults to the daemon URL).",
+          "scope": "application"
         },
         "celiador.token": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (`CELIADOR_AGENT_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** — your Supabase session is used instead."
+          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (`CELIADOR_AGENT_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** — your Supabase session is used instead.",
+          "scope": "application"
         },
         "celiador.provider": {
           "type": "string",
           "enum": ["anthropic", "daemon"],
           "default": "anthropic",
-          "markdownDescription": "Where the agent runs. `anthropic`: call Claude directly (needs an API key). `daemon`: route through the Celiador daemon (`celiador.daemonUrl`) using `celiador.token` — no client-side API key; the daemon holds the credential."
+          "markdownDescription": "Where the agent runs. `anthropic`: call Claude directly (needs an API key). `daemon`: route through the Celiador daemon (`celiador.daemonUrl`) with your **Celiador: Sign In** session (or `celiador.token` as a shared-secret fallback) — no client-side API key; the daemon holds the credential and picks the model. User-level only.",
+          "scope": "application"
         },
         "celiador.apiKey": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Anthropic API key for `anthropic` provider (fallback). Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage → this setting → `ANTHROPIC_API_KEY`."
+          "markdownDescription": "Anthropic API key for `anthropic` provider (fallback). Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage → this setting → `ANTHROPIC_API_KEY`.",
+          "scope": "application"
         },
         "celiador.autoApproveEdits": {
           "type": "boolean",
           "default": false,
-          "description": "Apply the agent's file writes without asking. When off (default), each write to a new/changed path requires confirmation."
+          "description": "Apply the agent's file writes without asking. When off (default), each write to a new/changed path requires confirmation. User-level only — a workspace can't turn this on.",
+          "scope": "application"
         },
         "celiador.model": {
           "type": "string",
           "default": "claude-opus-4-8",
-          "description": "Claude model the agent uses."
+          "description": "Claude model the agent uses with the `anthropic` provider (the daemon picks its own model).",
+          "scope": "machine"
         },
         "celiador.effort": {
           "type": "string",
           "enum": ["low", "medium", "high", "xhigh", "max"],
           "default": "high",
           "description": "Reasoning effort for the agent (higher = more thorough, more tokens)."
+        },
+        "celiador.jev.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "**Experimental.** Use Jev (TypeSafe AI) for fast typed decisions around the agent loop. Needs a key via **Celiador: Set Jev API Key** or `TYPESAFE_API_KEY`. Any Jev failure falls back to normal behavior.",
+          "scope": "application"
+        },
+        "celiador.jev.routeEffort": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When Jev is enabled, pick the reasoning effort per task instead of always using `celiador.effort` (which remains the fallback). Only applies to the `anthropic` provider."
+        },
+        "celiador.jev.classifyOutcome": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When Jev is enabled, classify how each turn ended. If the agent is waiting on you, the companion phone gets a question/“needs you” state instead of “Task finished”."
+        },
+        "celiador.jev.minConfidence": {
+          "type": "number",
+          "default": 0.6,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum Jev confidence required to act on a decision; below it the default behavior is kept."
         }
       }
     }

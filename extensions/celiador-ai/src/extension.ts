@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 import { Auth } from "./auth";
 import { SessionRelay } from "./relay";
 import { DaemonApi } from "./api";
+import { resolveDaemonUrl } from "./productConfig";
+import { classifyOutcome, routeEffort, type Outcome } from "./jev";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -15,8 +19,7 @@ let auth: Auth | undefined;
 
 function daemonConfig(): { url: string; token: string } {
   const cfg = vscode.workspace.getConfiguration("celiador");
-  const url = (cfg.get<string>("daemonUrl") || "https://celiador.ai").replace(/\/+$/, "");
-  return { url, token: cfg.get<string>("token") || "" };
+  return { url: resolveDaemonUrl(), token: cfg.get<string>("token") || "" };
 }
 
 function agentConfig(): { provider: string; model: string; effort: string; autoApprove: boolean } {
@@ -36,6 +39,21 @@ async function getApiKey(): Promise<string> {
   const cfg = vscode.workspace.getConfiguration("celiador").get<string>("apiKey");
   if (cfg) return cfg;
   return process.env.ANTHROPIC_API_KEY || "";
+}
+
+function jevConfig(): { enabled: boolean; routeEffort: boolean; classifyOutcome: boolean; minConfidence: number } {
+  const cfg = vscode.workspace.getConfiguration("celiador.jev");
+  return {
+    enabled: cfg.get<boolean>("enabled") ?? false,
+    routeEffort: cfg.get<boolean>("routeEffort") ?? true,
+    classifyOutcome: cfg.get<boolean>("classifyOutcome") ?? true,
+    minConfidence: cfg.get<number>("minConfidence") ?? 0.6,
+  };
+}
+
+/** Jev key: SecretStorage → TYPESAFE_API_KEY. Empty string → Jev disabled. */
+async function getJevKey(): Promise<string> {
+  return (await secretStore?.get("celiador.jevApiKey")) || process.env.TYPESAFE_API_KEY || "";
 }
 
 async function probeDaemon(): Promise<string> {
@@ -69,8 +87,38 @@ function resolveInWorkspace(root: vscode.Uri, p: string): vscode.Uri {
   return target;
 }
 
+/** Case-insensitive: APFS/NTFS are, so `.GIT/hooks` must not slip past. */
 function isProtectedPath(rel: string): boolean {
-  return /(^|\/)\.git(\/|$)/.test(rel) || /(^|\/)node_modules(\/|$)/.test(rel);
+  return /(^|[\\/])\.git([\\/]|$)/i.test(rel) || /(^|[\\/])node_modules([\\/]|$)/i.test(rel);
+}
+
+/**
+ * Symlink guard for local (file:) workspaces: the lexical check in
+ * resolveInWorkspace can't see that `src/link -> /etc` leaves the workspace.
+ * Resolve the real path of the target — or, for a file that doesn't exist yet,
+ * of its nearest existing ancestor — and require it to stay under the real root.
+ */
+async function assertRealPathInside(root: vscode.Uri, target: vscode.Uri): Promise<void> {
+  if (root.scheme !== "file" || target.scheme !== "file") return;
+  const realRoot = await fs.promises.realpath(root.fsPath);
+  let probe = target.fsPath;
+  for (;;) {
+    try {
+      const real = await fs.promises.realpath(probe);
+      if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+        throw new Error("Path resolves outside the workspace (symlink).");
+      }
+      if (isProtectedPath(path.relative(realRoot, real))) {
+        throw new Error("Path resolves inside .git or node_modules.");
+      }
+      return;
+    } catch (err: any) {
+      if (err?.code !== "ENOENT") throw err;
+      const parent = path.dirname(probe);
+      if (parent === probe) return;
+      probe = parent;
+    }
+  }
 }
 
 // ---- Tools ------------------------------------------------------------------
@@ -113,6 +161,7 @@ async function execTool(name: string, input: any, ctx: ToolCtx): Promise<{ text:
     }
     if (name === "read_file") {
       const uri = resolveInWorkspace(ctx.root, input.path);
+      await assertRealPathInside(ctx.root, uri);
       const stat = await vscode.workspace.fs.stat(uri);
       if (stat.size > MAX_READ_BYTES) {
         return { text: `File is ${stat.size} bytes (limit ${MAX_READ_BYTES}). Read a smaller file or a specific section.`, isError: true };
@@ -124,7 +173,9 @@ async function execTool(name: string, input: any, ctx: ToolCtx): Promise<{ text:
       const uri = resolveInWorkspace(ctx.root, input.path);
       const rel = vscode.workspace.asRelativePath(uri, false);
       if (isProtectedPath(rel)) return { text: `Refusing to write inside .git or node_modules (${rel}).`, isError: true };
+      await assertRealPathInside(ctx.root, uri);
       if (!(await ctx.ensureWrite(rel))) return { text: `The user declined the write to ${rel}.`, isError: true };
+      await assertRealPathInside(ctx.root, uri); // re-check: the tree may have changed while the user decided
       await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, ".."));
       await vscode.workspace.fs.writeFile(uri, Buffer.from(String(input.content ?? ""), "utf8"));
       ctx.changed.add(rel);
@@ -161,6 +212,9 @@ async function callModel(endpoint: string, headers: Record<string, string>, body
     if (res.ok) return res;
     if ((res.status === 429 || res.status >= 500) && attempt < 3) {
       const ra = Number(res.headers.get("retry-after"));
+      // A long Retry-After (e.g. the daemon's daily quota) means "not now" — report it
+      // instead of silently blocking the task for hours.
+      if (ra > 60) return res;
       await delay(ra ? ra * 1000 : 500 * 2 ** attempt, signal);
       continue;
     }
@@ -180,8 +234,13 @@ const SYSTEM_PROMPT = `You are Celiador, an AI coding agent embedded in the user
 
 type Emit = (msg: any) => void;
 
-async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ctx: ToolCtx): Promise<void> {
-  const { provider, model, effort } = agentConfig();
+/**
+ * Run one agent turn. Resolves true when the model stopped on its own (a real
+ * final answer), false on any early exit (auth/HTTP error, refusal, hop limit).
+ */
+async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ctx: ToolCtx, effortOverride?: string): Promise<boolean> {
+  const { provider, model, effort: configuredEffort } = agentConfig();
+  const effort = effortOverride ?? configuredEffort;
 
   let endpoint: string;
   let getHeaders: () => Promise<Record<string, string>>;
@@ -194,19 +253,21 @@ async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ct
     if (!signedIn && !token) {
       emit({ type: "reply", text: "Sign in to use the daemon: run “Celiador: Sign In”. (Or set `celiador.token` for the shared-secret fallback.)" });
       void vscode.commands.executeCommand("celiador.signIn");
-      return;
+      return false;
     }
     endpoint = `${url}/api/agent/messages`;
     getHeaders = async () => {
       const bearer = signedIn && auth ? await auth.getAccessToken() : token;
       return { Authorization: `Bearer ${bearer}`, "content-type": "application/json" };
     };
+    // The daemon owns the system prompt, tool set and model (it ignores these
+    // fields); they're still sent so an older daemon build keeps working.
     buildBody = () => ({ system: SYSTEM_PROMPT, tools: TOOLS, messages });
   } else {
     const apiKey = await getApiKey();
     if (!apiKey) {
       emit({ type: "reply", text: "No Anthropic API key set. Run “Celiador: Set API Key” (OS keychain), set `celiador.apiKey`, or export ANTHROPIC_API_KEY — or switch `celiador.provider` to \"daemon\"." });
-      return;
+      return false;
     }
     endpoint = ANTHROPIC_URL;
     getHeaders = async () => ({ "x-api-key": apiKey, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json" });
@@ -223,7 +284,7 @@ async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ct
   }
 
   for (let hop = 0; hop < MAX_HOPS; hop++) {
-    if (signal.aborted) return;
+    if (signal.aborted) return false;
     let res = await callModel(endpoint, await getHeaders(), buildBody(), signal);
     // Expired daemon JWT → refresh once and retry.
     if (res.status === 401 && daemonMode && auth && (await auth.tryRefresh())) {
@@ -233,7 +294,7 @@ async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ct
     if (!res.ok || !res.body) {
       const t = await res.text().catch(() => "");
       emit({ type: "reply", text: `${daemonMode ? "Daemon" : "Anthropic"} error ${res.status}: ${t.slice(0, 500)}` });
-      return;
+      return false;
     }
 
     const blocks: Record<number, any> = {};
@@ -286,14 +347,15 @@ async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ct
     });
     messages.push({ role: "assistant", content });
 
-    if (stopReason === "refusal") { emit({ type: "reply", text: "(The model declined this request.)" }); return; }
+    if (stopReason === "refusal") { emit({ type: "reply", text: "(The model declined this request.)" }); return false; }
 
     const toolUses = content.filter((c) => c.type === "tool_use");
-    if (stopReason !== "tool_use" || toolUses.length === 0) { emit({ type: "done" }); return; }
+    // Natural end: the caller emits "done" (possibly with a Jev outcome).
+    if (stopReason !== "tool_use" || toolUses.length === 0) { return true; }
 
     const results: any[] = [];
     for (const tu of toolUses) {
-      if (signal.aborted) return;
+      if (signal.aborted) return false;
       emit({ type: "tool", name: tu.name, input: tu.input, id: tu.id });
       const r = await execTool(tu.name, tu.input, ctx);
       emit({ type: "toolResult", name: tu.name, ok: !r.isError, id: tu.id });
@@ -302,6 +364,7 @@ async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ct
     messages.push({ role: "user", content: results });
   }
   emit({ type: "reply", text: "(Stopped after too many tool iterations.)" });
+  return false;
 }
 
 // ---- Chat webview -----------------------------------------------------------
@@ -360,8 +423,29 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
       case "toolResult": this.relay.publish({ kind: "toolResult", callId: msg.id ?? "", ok: msg.ok }); break;
       case "reply": this.relay.publish({ kind: "message", role: "assistant", text: msg.text }); break;
       case "running": if (msg.value) this.relay.publish({ kind: "state", state: "running" }); break;
-      case "done": this.relay.publish({ kind: "state", state: "done" }); this.relay.publish({ kind: "done" }); break;
+      case "done":
+        if (msg.finalState === "error" || msg.finalState === "cancelled") {
+          // One terminal state per run: a failed/stopped run must not also report "done".
+          this.relay.publish({ kind: "state", state: msg.finalState });
+        } else if (msg.outcome === "needs_user_input" || msg.outcome === "blocked") {
+          // The agent stopped but is waiting on the user: surface it as a question
+          // (the phone gets a "Celiador has a question" alert) rather than "Task finished".
+          // The phone's reply comes back as an answer/instruct and starts a follow-up turn.
+          this.relay.publish({ kind: "question", requestId: this.relay.newRequestId(), prompt: msg.prompt ?? "Celiador needs your input." });
+          this.relay.publish({ kind: "state", state: "awaiting" });
+        } else {
+          this.relay.publish({ kind: "state", state: "done" });
+          this.relay.publish({ kind: "done" });
+        }
+        break;
     }
+  }
+
+  /** Text of the last assistant message in the conversation (for outcome classification). */
+  private lastAssistantText(): string {
+    const last = [...this.messages].reverse().find((m) => m.role === "assistant");
+    if (!last || !Array.isArray(last.content)) return "";
+    return last.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n").trim();
   }
 
   private async runTask(text: string): Promise<void> {
@@ -375,7 +459,20 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
     // the phone sees the run from its start.
     await this.relay.start(text);
     this.emit({ type: "running", value: true });
+    const priorTurns = this.messages.filter((m) => m.role === "user" && typeof m.content === "string").length;
     this.messages.push({ role: "user", content: text });
+
+    // Jev: route reasoning effort for this task (direct Anthropic only — the daemon picks its own).
+    const jev = jevConfig();
+    const jevKey = jev.enabled ? await getJevKey() : "";
+    let effortOverride: string | undefined;
+    if (jevKey && jev.routeEffort && agentConfig().provider === "anthropic") {
+      const d = await routeEffort(jevKey, text, priorTurns, jev.minConfidence);
+      if (d) {
+        effortOverride = d.choice;
+        this.emit({ type: "note", text: `effort: ${d.choice} (Jev, ${d.confidence.toFixed(2)})` });
+      }
+    }
 
     let approveAll = false;
     const { autoApprove } = agentConfig();
@@ -388,6 +485,9 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
         const requestId = this.relay.newRequestId();
         this.relay.publish({ kind: "approval", requestId, approvalKind: "write_file", path: rel });
         this.relay.publish({ kind: "state", state: "awaiting" });
+        // Once the phone has decided, a later click on the (now stale) desktop
+        // modal must not take effect — in particular not "Allow all".
+        let settled = false;
         const local = (async () => {
           const choice = await vscode.window.showWarningMessage(
             `Celiador wants to write:\n${rel}`,
@@ -395,32 +495,49 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
             "Allow",
             "Allow all in this task"
           );
+          if (settled) return false;
           if (choice === "Allow all in this task") { approveAll = true; return true; }
           return choice === "Allow";
         })();
         const ok = this.relay.active ? await Promise.race([local, this.relay.waitForApproval(requestId)]) : await local;
+        settled = true;
         this.relay.clearApproval(requestId);
         this.relay.publish({ kind: "state", state: "running" });
         return ok;
       },
     };
 
+    let outcome: Outcome | undefined;
+    let finalText = "";
+    // The run's single terminal state, relayed once in `finally`.
+    let finalState: "done" | "error" | "cancelled" = "done";
+    const signal = this.controller.signal;
     try {
-      await runAgentTurn(this.messages, this.emit, this.controller.signal, ctx);
+      const endedNaturally = await runAgentTurn(this.messages, this.emit, signal, ctx, effortOverride);
+      if (!endedNaturally) finalState = signal.aborted ? "cancelled" : "error";
+      // Jev: did this turn really finish, or is the agent waiting on the user?
+      if (endedNaturally && jevKey && jev.classifyOutcome) {
+        finalText = this.lastAssistantText();
+        const d = finalText ? await classifyOutcome(jevKey, finalText, [...ctx.changed], jev.minConfidence) : undefined;
+        if (d) {
+          outcome = d.choice;
+          this.emit({ type: "note", text: `outcome: ${d.choice} (Jev, ${d.confidence.toFixed(2)})` });
+        }
+      }
     } catch (err: any) {
-      if (this.controller.signal.aborted) {
+      if (signal.aborted) {
         this.emit({ type: "reply", text: "(Stopped.)" });
-        this.relay.publish({ kind: "state", state: "cancelled" });
+        finalState = "cancelled";
       } else {
         this.emit({ type: "reply", text: `Error: ${err?.message ?? err}` });
-        this.relay.publish({ kind: "state", state: "error" });
+        finalState = "error";
       }
     } finally {
       if (ctx.changed.size) this.emit({ type: "reply", text: `Changed ${ctx.changed.size} file(s): ${[...ctx.changed].join(", ")}` });
       this.running = false;
       this.controller = undefined;
       this.emit({ type: "running", value: false });
-      this.emit({ type: "done" });
+      this.emit({ type: "done", finalState, outcome, prompt: finalText.slice(-500) || undefined });
     }
   }
 
@@ -487,7 +604,8 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
     const m = event.data;
     if (m.type === 'user') { bubble('you').textContent = m.text; current = null; }
     else if (m.type === 'delta') { if (!current) current = bubble('celiador'); current.textContent += m.text; log.scrollTop = log.scrollHeight; }
-    else if (m.type === 'tool') { line('tool', '→ ' + m.name + '(' + (m.input && (m.input.path || m.input.dir) || '') + ')'); current = null; }
+    else if (m.type === 'note') { line('tool', '· ' + m.text); current = null; }
+    else if (m.type === 'tool') { line('tool', '→ '+ m.name + '(' + (m.input && (m.input.path || m.input.dir) || '') + ')'); current = null; }
     else if (m.type === 'reply') { bubble('celiador').textContent = m.text; current = null; }
     else if (m.type === 'running') { sendBtn.disabled = m.value; input.disabled = m.value; stopBtn.style.display = m.value ? 'block' : 'none'; }
     else if (m.type === 'done') { current = null; }
@@ -547,6 +665,16 @@ export function activate(context: vscode.ExtensionContext): void {
       if (key && key.trim()) {
         await secretStore?.store("celiador.apiKey", key.trim());
         void vscode.window.showInformationMessage("Celiador API key saved to the OS keychain.");
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.setJevApiKey", async () => {
+      const key = await vscode.window.showInputBox({ prompt: "TypeSafe AI (Jev) API key for Celiador", password: true, ignoreFocusOut: true });
+      if (key && key.trim()) {
+        await secretStore?.store("celiador.jevApiKey", key.trim());
+        void vscode.window.showInformationMessage("Jev API key saved to the OS keychain. Enable it with `celiador.jev.enabled`.");
       }
     })
   );
