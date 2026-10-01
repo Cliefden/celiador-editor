@@ -23,6 +23,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.nvmrc'
+      - 'extensions/celiador-ai/**'
   workflow_dispatch:
 
 concurrency:
