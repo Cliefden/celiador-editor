@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 // daemon as `Authorization: Bearer` — the shared cross-client auth contract.
 
 const SESSION_KEY = "celiador.session";
+const PKCE_KEY = "celiador.pkce";
 // VS Code routes deep links as celiador://<publisher>.<extension><path> to the
 // extension's UriHandler. GoTrue's redirect allowlist must contain this exactly.
 export const AUTH_REDIRECT = "celiador://celiador.celiador-ai/auth-callback";
@@ -26,6 +27,11 @@ function jwtEmail(token: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+interface PkceState {
+  verifier: string;
+  expiresAt: number;
 }
 
 export class Auth {
@@ -88,6 +94,37 @@ export class Auth {
     };
   }
 
+  // ---- PKCE helpers ---------------------------------------------------------
+
+  private async generatePkce(): Promise<{ verifier: string; challenge: string }> {
+    const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
+    const data = new TextEncoder().encode(verifier);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const challenge = Buffer.from(hashBuffer)
+      .toString("base64url");
+    return { verifier, challenge };
+  }
+
+  private async storePkce(verifier: string): Promise<void> {
+    const state: PkceState = { verifier, expiresAt: Date.now() + 10 * 60 * 1000 };
+    await this.secrets.store(PKCE_KEY, JSON.stringify(state));
+  }
+
+  private async consumePkce(): Promise<string | null> {
+    const raw = await this.secrets.get(PKCE_KEY);
+    await this.secrets.delete(PKCE_KEY);
+    if (!raw) return null;
+    try {
+      const state: PkceState = JSON.parse(raw);
+      if (state.expiresAt < Date.now()) return null;
+      return state.verifier;
+    } catch {
+      return null;
+    }
+  }
+
   // ---- sign-in methods ------------------------------------------------------
 
   async signInWithPassword(email: string, password: string): Promise<void> {
@@ -105,7 +142,10 @@ export class Auth {
 
   async sendMagicLink(email: string): Promise<void> {
     const { base, anonKey } = await this.supa();
-    const url = `${base}/auth/v1/otp?redirect_to=${encodeURIComponent(AUTH_REDIRECT)}`;
+    const { verifier, challenge } = await this.generatePkce();
+    await this.storePkce(verifier);
+    const redirect = `${AUTH_REDIRECT}?code_challenge=${encodeURIComponent(challenge)}`;
+    const url = `${base}/auth/v1/otp?redirect_to=${encodeURIComponent(redirect)}`;
     const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
@@ -119,7 +159,10 @@ export class Auth {
 
   async signInWithGitHub(): Promise<void> {
     const { base } = await this.supa();
-    const url = `${base}/auth/v1/authorize?provider=github&redirect_to=${encodeURIComponent(AUTH_REDIRECT)}`;
+    const { verifier, challenge } = await this.generatePkce();
+    await this.storePkce(verifier);
+    const redirect = `${AUTH_REDIRECT}?code_challenge=${encodeURIComponent(challenge)}`;
+    const url = `${base}/auth/v1/authorize?provider=github&redirect_to=${encodeURIComponent(redirect)}`;
     await vscode.env.openExternal(vscode.Uri.parse(url));
   }
 
@@ -129,6 +172,23 @@ export class Auth {
     const access_token = params.get("access_token");
     const refresh_token = params.get("refresh_token");
     if (!access_token || !refresh_token) return false;
+
+    const expectedChallenge = params.get("code_challenge");
+    if (expectedChallenge) {
+      const verifier = await this.consumePkce();
+      if (!verifier) {
+        throw new Error("No pending sign-in flow (PKCE verifier missing or expired).");
+      }
+      const data = new TextEncoder().encode(verifier);
+      const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+      const actualChallenge = Buffer.from(hashBuffer).toString("base64url");
+      if (actualChallenge !== expectedChallenge) {
+        throw new Error("PKCE challenge mismatch (possible CSRF attack).");
+      }
+    } else {
+      throw new Error("Missing PKCE challenge in callback (deprecated implicit flow).");
+    }
+
     const now = Math.floor(Date.now() / 1000);
     await this.store({
       access_token,
