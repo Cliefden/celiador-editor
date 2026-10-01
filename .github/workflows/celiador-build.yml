@@ -116,11 +116,11 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
 
       - name: Save node_modules cache
-        if: steps.cache-node-modules.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.head_ref == 'cursor/fix-linux-disk-space-5658')
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
         uses: ./.github/actions/save-node-modules
 
       - name: Clean up cache archive to free disk space
-        if: steps.cache-node-modules.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.head_ref == 'cursor/fix-linux-disk-space-5658')
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
         run: |
           echo "=== Disk usage before removing cache archive ==="
           df -h
