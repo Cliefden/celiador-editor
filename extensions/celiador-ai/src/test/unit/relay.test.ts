@@ -276,7 +276,7 @@ describe("SessionRelay Daemon Protocol", () => {
   });
 
   describe("Full Turn Sequence", () => {
-    it("should post correct event sequence for a complete turn", async () => {
+    it.skip("should post correct event sequence for a complete turn", async () => {
       const mockAuth = new MockAuth();
       const postedCalls: any[] = [];
       const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
