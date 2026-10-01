@@ -1,16 +1,18 @@
 {
-  "compilerOptions": {
-    "module": "commonjs",
-    "target": "ES2022",
-    "lib": ["ES2022"],
-    "outDir": "out",
-    "rootDir": "src",
-    "sourceMap": true,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true
-  },
-  "include": ["src"],
-  "exclude": ["node_modules", "out"]
+	"extends": "../tsconfig.base.json",
+	"compilerOptions": {
+		"rootDir": "./src",
+		"outDir": "./out",
+		"sourceMap": true,
+		"types": [
+			"node"
+		],
+		"typeRoots": [
+			"./node_modules/@types"
+		]
+	},
+	"include": [
+		"src/**/*",
+		"../../src/vscode-dts/vscode.d.ts"
+	]
 }

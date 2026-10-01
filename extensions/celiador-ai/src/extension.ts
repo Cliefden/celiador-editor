@@ -3,6 +3,7 @@ import { Auth } from "./auth";
 import { getRestrictedSetting } from "./config";
 import { resolveInWorkspace, isProtectedPath } from "./paths";
 import { parseSSELine, splitSSEBuffer } from "./sse";
+import { CeliadorChatProvider, VENDOR } from "./provider";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -23,8 +24,8 @@ function daemonConfig(): { url: string; token: string } {
 function agentConfig(): { provider: string; model: string; effort: string; autoApprove: boolean } {
   const cfg = vscode.workspace.getConfiguration("celiador");
   return {
-    provider: getRestrictedSetting<string>("provider", "anthropic"),
-    model: cfg.get<string>("model") || "claude-opus-4-8",
+    provider: getRestrictedSetting<string>("provider", "daemon"),
+    model: cfg.get<string>("model") || "claude-opus-5",
     effort: cfg.get<string>("effort") || "high",
     autoApprove: getRestrictedSetting<boolean>("autoApproveEdits", false),
   };
@@ -37,6 +38,57 @@ async function getApiKey(): Promise<string> {
   const cfg = getRestrictedSetting<string>("apiKey", "");
   if (cfg) return cfg;
   return process.env.ANTHROPIC_API_KEY || "";
+}
+
+interface Balance {
+  plan: string;
+  planLabel: string;
+  includedUsd: number;
+  spentUsd: number;
+  topUpUsd: number;
+  remainingUsd: number;
+  period: string;
+}
+
+/** GET /api/me — identity, plan and what is left. */
+async function fetchMe(): Promise<{ balance: Balance } | undefined> {
+  if (!auth) return undefined;
+  const { url } = daemonConfig();
+  const bearer = (await auth.isSignedIn()) ? await auth.getAccessToken() : daemonConfig().token;
+  if (!bearer) return undefined;
+  try {
+    const res = await fetch(`${url}/api/me`, { headers: { Authorization: `Bearer ${bearer}` } });
+    if (!res.ok) return undefined;
+    return (await res.json()) as { balance: Balance };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Open a Stripe Checkout or Customer Portal session in the browser. */
+async function openBilling(path: "checkout" | "portal", body: Record<string, unknown>): Promise<void> {
+  if (!auth) return;
+  const { url } = daemonConfig();
+  const bearer = (await auth.isSignedIn()) ? await auth.getAccessToken() : daemonConfig().token;
+  if (!bearer) {
+    void vscode.window.showWarningMessage("Sign in to Celiador first.");
+    return;
+  }
+  try {
+    const res = await fetch(`${url}/api/billing/${path}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = (await res.json()) as { url?: string; error?: string };
+    if (!res.ok || !payload.url) {
+      void vscode.window.showErrorMessage(`Billing unavailable: ${payload.error ?? res.status}`);
+      return;
+    }
+    await vscode.env.openExternal(vscode.Uri.parse(payload.url));
+  } catch (err: any) {
+    void vscode.window.showErrorMessage(`Billing unavailable: ${err?.message ?? err}`);
+  }
 }
 
 async function probeDaemon(): Promise<string> {
@@ -54,9 +106,6 @@ async function probeDaemon(): Promise<string> {
 function workspaceRoot(): vscode.Uri | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
 }
-
-// ---- Tools ------------------------------------------------------------------
-
 const TOOLS = [
   {
     name: "list_files",
@@ -416,120 +465,4 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
   }
-}
-
-export function activate(context: vscode.ExtensionContext): void {
-  console.log("[celiador-ai] activated");
-  secretStore = context.secrets;
-  auth = new Auth(context.secrets);
-  const provider = new CeliadorChatViewProvider();
-  context.subscriptions.push(vscode.window.registerWebviewViewProvider("celiador.chat", provider));
-
-  // Capture the Supabase OAuth / magic-link deep link (celiador://…/auth-callback).
-  context.subscriptions.push(
-    vscode.window.registerUriHandler({
-      handleUri: async (uri) => {
-        if (!auth) return;
-        if (await auth.handleCallback(uri)) {
-          void vscode.window.showInformationMessage(`Signed in to Celiador as ${(await auth.currentEmail()) ?? "your account"}.`);
-        }
-      },
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("celiador.openChat", async () => {
-      await vscode.commands.executeCommand("celiador.chat.focus");
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("celiador.setApiKey", async () => {
-      const key = await vscode.window.showInputBox({ prompt: "Anthropic API key for Celiador", password: true, ignoreFocusOut: true });
-      if (key && key.trim()) {
-        await secretStore?.store("celiador.apiKey", key.trim());
-        void vscode.window.showInformationMessage("Celiador API key saved to the OS keychain.");
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("celiador.signIn", async () => {
-      if (!auth) return;
-      const pick = await vscode.window.showQuickPick(
-        [
-          { label: "Sign in — email & password", id: "password" },
-          { label: "Create account — email & password", id: "signup" },
-          { label: "Magic link (email)", id: "magic" },
-          { label: "GitHub", id: "github" },
-        ],
-        { placeHolder: "Sign in to Celiador" }
-      );
-      if (!pick) return;
-      try {
-        if (pick.id === "github") { await auth.signInWithGitHub(); return; }
-        const email = (await vscode.window.showInputBox({ prompt: "Email", ignoreFocusOut: true }))?.trim();
-        if (!email) return;
-        if (pick.id === "magic") {
-          await auth.sendMagicLink(email);
-          void vscode.window.showInformationMessage("Magic link sent — open the link in your email to finish signing in.");
-          return;
-        }
-        const password = await vscode.window.showInputBox({ prompt: "Password", password: true, ignoreFocusOut: true });
-        if (!password) return;
-        if (pick.id === "signup") {
-          const active = await auth.signUp(email, password);
-          void vscode.window.showInformationMessage(active ? "Account created and signed in." : "Account created — confirm via the email we sent, then sign in.");
-        } else {
-          await auth.signInWithPassword(email, password);
-          void vscode.window.showInformationMessage(`Signed in as ${email}.`);
-        }
-      } catch (err: any) {
-        void vscode.window.showErrorMessage(`Sign-in failed: ${err?.message ?? err}`);
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("celiador.signOut", async () => {
-      await auth?.signOut();
-      void vscode.window.showInformationMessage("Signed out of Celiador.");
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("celiador.checkConnection", async () => {
-      try { void vscode.window.showInformationMessage(await probeDaemon()); }
-      catch (err: any) { void vscode.window.showErrorMessage(`Celiador daemon unreachable: ${err?.message ?? err}`); }
-    })
-  );
-
-  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  status.text = "$(sparkle) Celiador";
-  status.tooltip = "Open Celiador chat";
-  status.command = "celiador.openChat";
-  status.show();
-  context.subscriptions.push(status);
-
-  // Account status item — reflects signed-in state.
-  const authStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
-  const updateAuthStatus = async () => {
-    const email = await auth?.currentEmail();
-    if (email) {
-      authStatus.text = `$(account) ${email}`;
-      authStatus.tooltip = "Celiador account — click to sign out";
-      authStatus.command = "celiador.signOut";
-    } else {
-      authStatus.text = "$(account) Sign in";
-      authStatus.tooltip = "Sign in to Celiador";
-      authStatus.command = "celiador.signIn";
-    }
-    authStatus.show();
-  };
-  context.subscriptions.push(authStatus, auth.onDidChange(() => void updateAuthStatus()));
-  void updateAuthStatus();
-}
-
-export function deactivate(): void {
-  /* no-op */
 }

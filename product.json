@@ -17,12 +17,21 @@
 	"win32DirName": "Celiador",
 	"win32NameVersion": "Celiador",
 	"win32RegValueName": "Celiador",
+<<<<<<< HEAD
 	"win32x64AppId": "{{3F21E567-CB2D-4E4F-85FB-7BD6C55D5360}",
 	"win32arm64AppId": "{{85833293-1782-4927-873B-E6376C0B7768}",
 	"win32x64UserAppId": "{{4497F15F-1971-4097-BD79-777B7C4B5DC4}",
 	"win32arm64UserAppId": "{{7F4B7DA1-CB24-474C-A19C-37E0C3D9F6D0}",
 	"win32AppUserModelId": "Celiador.Celiador",
 	"win32ShellNameShort": "&Celiador",
+=======
+	"win32x64AppId": "{{C308FB63-2114-4CE0-88F8-A6B8A731C04B}",
+	"win32arm64AppId": "{{B1A85CC7-B000-4C83-BC2F-B1F0DFCEE78B}",
+	"win32x64UserAppId": "{{0C664724-D57F-4936-9EB2-57F72945442A}",
+	"win32arm64UserAppId": "{{032202FA-DABD-488D-884C-6DA65771DB8F}",
+	"win32AppUserModelId": "Celiador.Celiador",
+	"win32ShellNameShort": "C&eliador",
+>>>>>>> origin/claude/mac-app-download-flow-syr5e1
 	"win32TunnelServiceMutex": "celiador-tunnelservice",
 	"win32TunnelMutex": "celiador-tunnel",
 	"darwinBundleIdentifier": "ai.celiador.editor",
@@ -246,5 +255,10 @@
 	],
 	"builtInExtensionsEnabledWithAutoUpdates": [],
 	"sessionsWindowAllowedExtensions": [],
+<<<<<<< HEAD
 	"voiceWsUrl": ""
+=======
+	"updateUrl": "https://celiador.ai",
+	"downloadUrl": "https://celiador.ai/download"
+>>>>>>> origin/claude/mac-app-download-flow-syr5e1
 }

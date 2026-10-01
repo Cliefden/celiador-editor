@@ -3,7 +3,30 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CopilotClient, RuntimeConnection, type CopilotClientOptions, type GitHubTelemetryNotification, type ManagedSettingsResolvedData, type SessionMetadata, type SessionMode as CopilotSdkMode } from '@github/copilot-sdk';
+import type { CopilotClient, CopilotClientOptions, GitHubTelemetryNotification, ManagedSettingsResolvedData, SessionMetadata, SessionMode as CopilotSdkMode } from '@github/copilot-sdk';
+
+/**
+ * `@github/copilot-sdk` is GitHub-proprietary and must not ship in a
+ * distributed build, so it is a devDependency and cannot be imported at module
+ * load. It is loaded on demand from `_ensureClientOnce`, which is the only
+ * path that reaches the SDK; `copilotSdk()` then reads it synchronously so
+ * `_createCopilotClient` keeps its protected signature (tests override it).
+ *
+ * In a Celiador build that path is never taken — the Copilot provider is dead
+ * because its CLI was removed — so this never loads.
+ */
+type CopilotSdkModule = typeof import('@github/copilot-sdk');
+let copilotSdkModule: CopilotSdkModule | undefined;
+async function loadCopilotSdk(): Promise<CopilotSdkModule> {
+	copilotSdkModule ??= await import('@github/copilot-sdk');
+	return copilotSdkModule;
+}
+function copilotSdk(): CopilotSdkModule {
+	if (!copilotSdkModule) {
+		throw new Error('@github/copilot-sdk is not available in this build; the Copilot provider cannot start.');
+	}
+	return copilotSdkModule;
+}
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import { pathToFileURL } from 'url';
@@ -1327,7 +1350,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 	}
 
 	protected _createCopilotClient(options: CopilotClientOptions): CopilotClient {
-		return new CopilotClient(options);
+		return new (copilotSdk().CopilotClient)(options);
 	}
 
 	// ---- auth ---------------------------------------------------------------
@@ -2366,7 +2389,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 
 			const clientOptions: CopilotClientOptions = {
 				useLoggedInUser: false,
-				connection: RuntimeConnection.forStdio({ path: cliPath }),
+				connection: (await loadCopilotSdk()).RuntimeConnection.forStdio({ path: cliPath }),
 				env,
 				clientInfo: {
 					applicationName: 'vscode-agent-host',
