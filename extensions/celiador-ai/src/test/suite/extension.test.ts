@@ -1,5 +1,8 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
+import { resolveInWorkspace, isProtectedPath } from "../../paths";
+import { getRestrictedSetting } from "../../config";
+import { parseSSELine, splitSSEBuffer } from "../../sse";
 
 suite("Celiador AI Extension Test Suite", () => {
   vscode.window.showInformationMessage("Start all tests.");
@@ -103,32 +106,17 @@ suite("Celiador AI Extension Test Suite", () => {
   });
 
   suite("Settings Security", () => {
-    test("restricted settings should not read workspace values", async () => {
-      const restrictedSettings = [
-        "daemonUrl",
-        "supabaseUrl",
-        "token",
-        "apiKey",
-        "provider",
-        "autoApproveEdits",
-      ];
-
-      for (const setting of restrictedSettings) {
-        const cfg = vscode.workspace.getConfiguration("celiador");
-        const inspection = cfg.inspect(setting);
-        
-        if (inspection?.workspaceValue !== undefined) {
-          const restricted = getRestrictedSettingValue(setting);
-          assert.notStrictEqual(
-            restricted,
-            inspection.workspaceValue,
-            `Setting ${setting} should not use workspace value`
-          );
-        }
+    test("restricted settings use globalValue not workspaceValue", async () => {
+      const cfg = vscode.workspace.getConfiguration("celiador");
+      const inspection = cfg.inspect<string>("daemonUrl");
+      
+      if (inspection) {
+        const result = getRestrictedSetting("daemonUrl", "https://celiador.ai");
+        assert.ok(result === (inspection.globalValue ?? inspection.defaultValue ?? "https://celiador.ai"));
       }
     });
 
-    test("non-restricted settings should work normally", async () => {
+    test("non-restricted settings work normally", async () => {
       const cfg = vscode.workspace.getConfiguration("celiador");
       
       const model = cfg.get<string>("model");
@@ -149,14 +137,8 @@ suite("Celiador AI Extension Test Suite", () => {
 
       const events: any[] = [];
       for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === "[DONE]") continue;
-        try {
-          events.push(JSON.parse(payload));
-        } catch {
-          continue;
-        }
+        const event = parseSSELine(line);
+        if (event) events.push(event);
       }
 
       assert.strictEqual(events.length, 2);
@@ -165,12 +147,11 @@ suite("Celiador AI Extension Test Suite", () => {
     });
 
     test("should handle incomplete buffer correctly", () => {
-      let buf = "data: {\"type\":\"start\"}\ndata: {\"ty";
-      const lines = buf.split("\n");
-      buf = lines.pop() ?? "";
+      const buf = "data: {\"type\":\"start\"}\ndata: {\"ty";
+      const { lines, remaining } = splitSSEBuffer(buf);
       
       assert.strictEqual(lines.length, 1);
-      assert.strictEqual(buf, "data: {\"ty");
+      assert.strictEqual(remaining, "data: {\"ty");
     });
 
     test("should skip non-data lines", () => {
@@ -182,38 +163,11 @@ suite("Celiador AI Extension Test Suite", () => {
 
       const events: any[] = [];
       for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (!payload) continue;
-        events.push(JSON.parse(payload));
+        const event = parseSSELine(line);
+        if (event) events.push(event);
       }
 
       assert.strictEqual(events.length, 1);
     });
   });
 });
-
-function resolveInWorkspace(root: vscode.Uri, p: string): vscode.Uri {
-  const rel = String(p ?? "").trim();
-  if (!rel) throw new Error("Empty path.");
-  if (rel.startsWith("/") || rel.startsWith("~") || /^[A-Za-z]:[\\/]/.test(rel)) {
-    throw new Error("Path must be relative to the workspace root.");
-  }
-  const target = vscode.Uri.joinPath(root, rel);
-  const rootPrefix = root.path.endsWith("/") ? root.path : root.path + "/";
-  if (target.path !== root.path && !target.path.startsWith(rootPrefix)) {
-    throw new Error("Path escapes the workspace root.");
-  }
-  return target;
-}
-
-function isProtectedPath(rel: string): boolean {
-  return /(^|\/)\.git(\/|$)/.test(rel) || /(^|\/)node_modules(\/|$)/.test(rel);
-}
-
-function getRestrictedSettingValue<T>(key: string): T | undefined {
-  const cfg = vscode.workspace.getConfiguration("celiador");
-  const inspection = cfg.inspect<T>(key);
-  if (!inspection) return undefined;
-  return inspection.globalValue ?? inspection.defaultValue;
-}

@@ -1,5 +1,8 @@
 import * as vscode from "vscode";
 import { Auth } from "./auth";
+import { getRestrictedSetting } from "./config";
+import { resolveInWorkspace, isProtectedPath } from "./paths";
+import { parseSSELine, splitSSEBuffer } from "./sse";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -10,13 +13,6 @@ let secretStore: vscode.SecretStorage | undefined;
 let auth: Auth | undefined;
 
 // ---- Config -----------------------------------------------------------------
-
-function getRestrictedSetting<T>(key: string, defaultValue: T): T {
-  const cfg = vscode.workspace.getConfiguration("celiador");
-  const inspection = cfg.inspect<T>(key);
-  if (!inspection) return defaultValue;
-  return inspection.globalValue ?? inspection.defaultValue ?? defaultValue;
-}
 
 function daemonConfig(): { url: string; token: string } {
   const url = (getRestrictedSetting<string>("daemonUrl", "https://celiador.ai")).replace(/\/+$/, "");
@@ -57,25 +53,6 @@ async function probeDaemon(): Promise<string> {
 
 function workspaceRoot(): vscode.Uri | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
-}
-
-/** Resolve a caller-supplied path, guaranteeing it stays inside the workspace. */
-function resolveInWorkspace(root: vscode.Uri, p: string): vscode.Uri {
-  const rel = String(p ?? "").trim();
-  if (!rel) throw new Error("Empty path.");
-  if (rel.startsWith("/") || rel.startsWith("~") || /^[A-Za-z]:[\\/]/.test(rel)) {
-    throw new Error("Path must be relative to the workspace root.");
-  }
-  const target = vscode.Uri.joinPath(root, rel); // normalizes any ".." segments
-  const rootPrefix = root.path.endsWith("/") ? root.path : root.path + "/";
-  if (target.path !== root.path && !target.path.startsWith(rootPrefix)) {
-    throw new Error("Path escapes the workspace root.");
-  }
-  return target;
-}
-
-function isProtectedPath(rel: string): boolean {
-  return /(^|\/)\.git(\/|$)/.test(rel) || /(^|\/)node_modules(\/|$)/.test(rel);
 }
 
 // ---- Tools ------------------------------------------------------------------
@@ -251,14 +228,11 @@ async function runAgentTurn(messages: any[], emit: Emit, signal: AbortSignal, ct
       const { done, value } = await reader.read();
       if (done) break;
       buf += decoder.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() ?? "";
+      const { lines, remaining } = splitSSEBuffer(buf);
+      buf = remaining;
       for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === "[DONE]") continue;
-        let ev: any;
-        try { ev = JSON.parse(payload); } catch { continue; }
+        const ev = parseSSELine(line);
+        if (!ev) continue;
         if (ev.type === "content_block_start") {
           const cb = ev.content_block;
           blocks[ev.index] =
