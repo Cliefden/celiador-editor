@@ -4,6 +4,7 @@ import { getRestrictedSetting } from "./config";
 import { resolveInWorkspace, isProtectedPath } from "./paths";
 import { parseSSELine, splitSSEBuffer } from "./sse";
 import { CeliadorChatProvider, VENDOR } from "./provider";
+import { SessionRelay, SessionEvent } from "./relay";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -338,18 +339,40 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
   private messages: any[] = [];
   private controller: AbortController | undefined;
   private running = false;
+  private relay: SessionRelay | undefined;
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = this.html(webviewView.webview);
-    const emit: Emit = (msg) => webviewView.webview.postMessage(msg);
 
     webviewView.webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === "send") {
         const text = String(msg.text || "").trim();
         if (!text || this.running) return;
         const root = workspaceRoot();
+        
+        const emit: Emit = (msg) => {
+          webviewView.webview.postMessage(msg);
+          if (this.relay && msg.type !== "running") {
+            void this.relay.postEvent(msg as SessionEvent);
+          }
+        };
+        
         if (!root) { emit({ type: "reply", text: "Open a folder first — the agent works on files in your workspace." }); return; }
+
+        // Start session relay if signed in
+        if (auth && await auth.isSignedIn()) {
+          const { url } = daemonConfig();
+          this.relay?.dispose();
+          this.relay = new SessionRelay(url, auth, (cmd) => {
+            // Handle phone commands
+            if (cmd.type === "cancel") {
+              this.controller?.abort();
+            }
+            // TODO: Handle approve/reject/answer/message commands
+          });
+          await this.relay.createSession(text.slice(0, 100));
+        }
 
         this.running = true;
         emit({ type: "running", value: true });
@@ -385,6 +408,10 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
           this.controller = undefined;
           emit({ type: "running", value: false });
           emit({ type: "done" });
+          
+          // Clean up relay
+          this.relay?.dispose();
+          this.relay = undefined;
         }
       } else if (msg?.type === "stop") {
         this.controller?.abort();
