@@ -4,6 +4,9 @@ export interface SSEEvent {
 }
 
 export function parseSSELine(line: string): SSEEvent | null {
+  // Skip event lines (e.g., "event: ping" heartbeats)
+  if (line.startsWith("event:")) return null;
+  
   if (!line.startsWith("data:")) return null;
   const payload = line.slice(5).trim();
   if (!payload || payload === "[DONE]") return null;

@@ -365,11 +365,14 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
               this.controller?.abort();
             } else if (cmd.kind === "instruct") {
               // Queue new turn from phone
+              // Note: daemon already logged this message as {kind: message, role: user}
+              // so if implementing instruct-driven turns, don't call postUserMessage again
               webviewView.webview.postMessage({ type: "phone-message", text: cmd.text });
             }
           });
           const sessionId = await this.relay.createSession(text.slice(0, 100));
           if (sessionId) {
+            // Post user message for editor-initiated turn
             await this.relay.postUserMessage(text);
           }
         }
