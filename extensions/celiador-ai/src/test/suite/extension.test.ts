@@ -215,5 +215,5 @@ function getRestrictedSettingValue<T>(key: string): T | undefined {
   const cfg = vscode.workspace.getConfiguration("celiador");
   const inspection = cfg.inspect<T>(key);
   if (!inspection) return undefined;
-  return inspection.applicationValue ?? inspection.globalValue ?? inspection.defaultValue;
+  return inspection.globalValue ?? inspection.defaultValue;
 }

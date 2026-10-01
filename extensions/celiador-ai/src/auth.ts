@@ -47,7 +47,7 @@ export class Auth {
     const cfg = vscode.workspace.getConfiguration("celiador");
     const inspection = cfg.inspect<T>(key);
     if (!inspection) return defaultValue;
-    return inspection.applicationValue ?? inspection.globalValue ?? inspection.defaultValue ?? defaultValue;
+    return inspection.globalValue ?? inspection.defaultValue ?? defaultValue;
   }
 
   private daemonUrl(): string {
