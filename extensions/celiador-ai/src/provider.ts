@@ -36,9 +36,9 @@ const FALLBACK_MODELS: vscode.LanguageModelChatInformation[] = [
 function config(): { url: string; token: string; provider: string; model: string } {
   const cfg = vscode.workspace.getConfiguration("celiador");
   return {
-    url: (cfg.get<string>("daemonUrl") || "https://celiador.ai").replace(/\/+$/, ""),
-    token: cfg.get<string>("token") || "",
-    provider: cfg.get<string>("provider") || "daemon",
+    url: (getRestrictedSetting<string>("daemonUrl", "https://celiador.ai")).replace(/\/+$/, ""),
+    token: getRestrictedSetting<string>("token", ""),
+    provider: getRestrictedSetting<string>("provider", "daemon"),
     model: cfg.get<string>("model") || "claude-opus-5",
   };
 }

@@ -1,7 +1,7 @@
 {
   "name": "celiador-ai",
   "displayName": "Celiador AI",
-  "description": "Celiador's AI layer \u2014 provides the Celiador language model to chat, agent mode and inline edit.",
+  "description": "Celiador's AI layer — provides the Celiador language model to chat, agent mode and inline edit.",
   "version": "0.0.2",
   "publisher": "celiador",
   "license": "MIT",
@@ -19,9 +19,8 @@
   ],
   "capabilities": {
     "untrustedWorkspaces": {
-<<<<<<< HEAD
       "supported": "limited",
-      "description": "The Celiador agent reads and edits files in your workspace. Security-sensitive settings (authentication URLs, tokens, auto-approval) are restricted in untrusted workspaces.",
+      "description": "Celiador provides a language model and custom chat UI. Security-sensitive settings (authentication URLs, tokens, auto-approval) are restricted in untrusted workspaces.",
       "restrictedConfigurations": [
         "celiador.daemonUrl",
         "celiador.supabaseUrl",
@@ -30,10 +29,6 @@
         "celiador.provider",
         "celiador.autoApproveEdits"
       ]
-=======
-      "supported": true,
-      "description": "Celiador provides a language model to the editor's chat and agent features; file edits are made and confirmed by the editor, not by this extension."
->>>>>>> origin/claude/mac-app-download-flow-syr5e1
     }
   },
   "contributes": {
@@ -43,6 +38,24 @@
         "displayName": "Celiador"
       }
     ],
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "celiador",
+          "title": "Celiador",
+          "icon": "media/celiador.svg"
+        }
+      ]
+    },
+    "views": {
+      "celiador": [
+        {
+          "id": "celiador.chat",
+          "name": "Chat",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "celiador.openChat",
@@ -95,20 +108,9 @@
         "celiador.token": {
           "type": "string",
           "default": "",
-<<<<<<< HEAD
           "scope": "machine",
           "restricted": true,
-          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (`CELIADOR_AGENT_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** — your Supabase session is used instead."
-        },
-        "celiador.provider": {
-          "type": "string",
-          "enum": ["anthropic", "daemon"],
-          "default": "anthropic",
-          "scope": "application",
-          "restricted": true,
-          "markdownDescription": "Where the agent runs. `anthropic`: call Claude directly (needs an API key). `daemon`: route through the Celiador daemon (`celiador.daemonUrl`) using `celiador.token` — no client-side API key; the daemon holds the credential."
-=======
-          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (the daemon's `CELIADOR_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** \u2014 your Supabase session is used instead."
+          "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (the daemon's `CELIADOR_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** — your Supabase session is used instead."
         },
         "celiador.provider": {
           "type": "string",
@@ -117,31 +119,28 @@
             "anthropic"
           ],
           "default": "daemon",
-          "markdownDescription": "Where the agent runs. `daemon` (default): route through the Celiador daemon (`celiador.daemonUrl`) using your signed-in account \u2014 no client-side API key, and your plan's included usage applies. `anthropic`: unsupported escape hatch that calls Claude directly with your own key; nothing is metered and no included usage applies."
->>>>>>> origin/claude/mac-app-download-flow-syr5e1
+          "scope": "application",
+          "restricted": true,
+          "markdownDescription": "Where the agent runs. `daemon` (default): route through the Celiador daemon (`celiador.daemonUrl`) using your signed-in account — no client-side API key, and your plan's included usage applies. `anthropic`: unsupported escape hatch that calls Claude directly with your own key; nothing is metered and no included usage applies."
         },
         "celiador.apiKey": {
           "type": "string",
           "default": "",
-<<<<<<< HEAD
           "scope": "machine",
           "restricted": true,
-          "markdownDescription": "Anthropic API key for `anthropic` provider (fallback). Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage → this setting → `ANTHROPIC_API_KEY`."
+          "markdownDescription": "Anthropic API key for the unsupported `anthropic` provider. Billing, usage limits and support do not apply when you bring your own key. Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage → this setting → `ANTHROPIC_API_KEY`."
         },
         "celiador.autoApproveEdits": {
           "type": "boolean",
           "default": false,
           "scope": "application",
           "restricted": true,
-          "description": "Apply the agent's file writes without asking. When off (default), each write to a new/changed path requires confirmation."
-=======
-          "markdownDescription": "Anthropic API key for the unsupported `anthropic` provider. Billing, usage limits and support do not apply when you bring your own key. Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage \u2192 this setting \u2192 `ANTHROPIC_API_KEY`."
->>>>>>> origin/claude/mac-app-download-flow-syr5e1
+          "description": "Apply the agent's file writes without asking (custom chat only). When off (default), each write to a new/changed path requires confirmation."
         },
         "celiador.model": {
           "type": "string",
           "default": "claude-opus-5",
-          "description": "Claude model the agent uses. Only applies to the unsupported `anthropic` provider \u2014 in `daemon` mode the server picks the model per task."
+          "description": "Claude model the agent uses. Only applies to the unsupported `anthropic` provider — in `daemon` mode the server picks the model per task."
         },
         "celiador.effort": {
           "type": "string",
@@ -170,13 +169,9 @@
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.0",
     "@types/node": "^22.0.0",
-<<<<<<< HEAD
-    "@types/vscode": "^1.138.0",
     "@vscode/test-electron": "^2.3.0",
     "glob": "^10.0.0",
     "mocha": "^10.2.0",
-=======
->>>>>>> origin/claude/mac-app-download-flow-syr5e1
     "typescript": "^5.6.0"
   }
 }
