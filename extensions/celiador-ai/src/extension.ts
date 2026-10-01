@@ -11,19 +11,26 @@ let auth: Auth | undefined;
 
 // ---- Config -----------------------------------------------------------------
 
-function daemonConfig(): { url: string; token: string } {
+function getRestrictedSetting<T>(key: string, defaultValue: T): T {
   const cfg = vscode.workspace.getConfiguration("celiador");
-  const url = (cfg.get<string>("daemonUrl") || "https://celiador.ai").replace(/\/+$/, "");
-  return { url, token: cfg.get<string>("token") || "" };
+  const inspection = cfg.inspect<T>(key);
+  if (!inspection) return defaultValue;
+  return inspection.applicationValue ?? inspection.globalValue ?? inspection.defaultValue ?? defaultValue;
+}
+
+function daemonConfig(): { url: string; token: string } {
+  const url = (getRestrictedSetting<string>("daemonUrl", "https://celiador.ai")).replace(/\/+$/, "");
+  const token = getRestrictedSetting<string>("token", "");
+  return { url, token };
 }
 
 function agentConfig(): { provider: string; model: string; effort: string; autoApprove: boolean } {
   const cfg = vscode.workspace.getConfiguration("celiador");
   return {
-    provider: cfg.get<string>("provider") || "anthropic",
+    provider: getRestrictedSetting<string>("provider", "anthropic"),
     model: cfg.get<string>("model") || "claude-opus-4-8",
     effort: cfg.get<string>("effort") || "high",
-    autoApprove: cfg.get<boolean>("autoApproveEdits") ?? false,
+    autoApprove: getRestrictedSetting<boolean>("autoApproveEdits", false),
   };
 }
 
@@ -31,7 +38,7 @@ function agentConfig(): { provider: string; model: string; effort: string; autoA
 async function getApiKey(): Promise<string> {
   const secret = await secretStore?.get("celiador.apiKey");
   if (secret) return secret;
-  const cfg = vscode.workspace.getConfiguration("celiador").get<string>("apiKey");
+  const cfg = getRestrictedSetting<string>("apiKey", "");
   if (cfg) return cfg;
   return process.env.ANTHROPIC_API_KEY || "";
 }

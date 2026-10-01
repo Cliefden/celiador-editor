@@ -19,8 +19,16 @@
   ],
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": true,
-      "description": "The Celiador agent reads and edits files in your workspace; every write is confirmed before it is applied."
+      "supported": "limited",
+      "description": "The Celiador agent reads and edits files in your workspace. Security-sensitive settings (authentication URLs, tokens, auto-approval) are restricted in untrusted workspaces.",
+      "restrictedConfigurations": [
+        "celiador.daemonUrl",
+        "celiador.supabaseUrl",
+        "celiador.token",
+        "celiador.apiKey",
+        "celiador.provider",
+        "celiador.autoApproveEdits"
+      ]
     }
   },
   "contributes": {
@@ -75,32 +83,44 @@
         "celiador.daemonUrl": {
           "type": "string",
           "default": "https://celiador.ai",
+          "scope": "application",
+          "restricted": true,
           "description": "Base URL of the Celiador daemon the AI layer talks to."
         },
         "celiador.supabaseUrl": {
           "type": "string",
           "default": "",
+          "scope": "application",
+          "restricted": true,
           "markdownDescription": "Override the Supabase/GoTrue base URL used for sign-in. Leave empty to use the value from the daemon's `GET /api/config` (self-hosted defaults to the daemon URL)."
         },
         "celiador.token": {
           "type": "string",
           "default": "",
+          "scope": "machine",
+          "restricted": true,
           "markdownDescription": "Optional shared-secret fallback for the daemon agent endpoint (`CELIADOR_AGENT_TOKEN`). Normally leave empty and sign in with **Celiador: Sign In** — your Supabase session is used instead."
         },
         "celiador.provider": {
           "type": "string",
           "enum": ["anthropic", "daemon"],
           "default": "anthropic",
+          "scope": "application",
+          "restricted": true,
           "markdownDescription": "Where the agent runs. `anthropic`: call Claude directly (needs an API key). `daemon`: route through the Celiador daemon (`celiador.daemonUrl`) using `celiador.token` — no client-side API key; the daemon holds the credential."
         },
         "celiador.apiKey": {
           "type": "string",
           "default": "",
+          "scope": "machine",
+          "restricted": true,
           "markdownDescription": "Anthropic API key for `anthropic` provider (fallback). Prefer the **Celiador: Set API Key** command, which stores it in the OS keychain via SecretStorage. Resolution order: SecretStorage → this setting → `ANTHROPIC_API_KEY`."
         },
         "celiador.autoApproveEdits": {
           "type": "boolean",
           "default": false,
+          "scope": "application",
+          "restricted": true,
           "description": "Apply the agent's file writes without asking. When off (default), each write to a new/changed path requires confirmation."
         },
         "celiador.model": {

@@ -37,15 +37,21 @@ export class Auth {
 
   constructor(private readonly secrets: vscode.SecretStorage) {}
 
-  private daemonUrl(): string {
+  private getRestrictedSetting<T>(key: string, defaultValue: T): T {
     const cfg = vscode.workspace.getConfiguration("celiador");
-    return (cfg.get<string>("daemonUrl") || "https://celiador.ai").replace(/\/+$/, "");
+    const inspection = cfg.inspect<T>(key);
+    if (!inspection) return defaultValue;
+    return inspection.applicationValue ?? inspection.globalValue ?? inspection.defaultValue ?? defaultValue;
+  }
+
+  private daemonUrl(): string {
+    return this.getRestrictedSetting<string>("daemonUrl", "https://celiador.ai").replace(/\/+$/, "");
   }
 
   /** Resolve the Supabase base URL + anon key (setting override → /api/config). */
   private async supa(): Promise<{ base: string; anonKey: string }> {
     if (this.supaConfig) return this.supaConfig;
-    const override = vscode.workspace.getConfiguration("celiador").get<string>("supabaseUrl");
+    const override = this.getRestrictedSetting<string>("supabaseUrl", "");
     let cfg: any = {};
     try {
       const res = await fetch(`${this.daemonUrl()}/api/config`, { headers: { Accept: "application/json" } });
