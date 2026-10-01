@@ -45,6 +45,20 @@ codesign --force --deep --sign "Apple Development: <your identity>" \
 
 On first launch, approve the "Celiador Safe Storage" keychain prompt once ("Always Allow"); it then persists across rebuilds.
 
+## CI builds (macOS, Windows, Linux)
+
+[`.github/workflows/celiador-build.yml`](.github/workflows/celiador-build.yml) builds all three platforms on every push to `main`, on pull requests that touch the build, packaging or branding, and on demand (Actions → Celiador Build → Run workflow). Packages are uploaded as workflow artifacts:
+
+| Platform | Runner | Output |
+|----------|--------|--------|
+| macOS arm64 | `macos-15` | `.dmg`, `.zip` |
+| Windows x64 | `windows-2022` | user installer, system installer, `.zip` |
+| Linux x64 | `ubuntu-24.04` | `.deb`, `.rpm`, `.tar.gz` |
+
+Pushing a `v*` tag (e.g. `v0.1.0`) also attaches everything to a **draft** GitHub release.
+
+macOS signing: add the repository secrets `MACOS_CERTIFICATE` (base64 of a `.p12` export), `MACOS_CERTIFICATE_PASSWORD` and `MACOS_SIGNING_IDENTITY` to sign with your named identity. Without them the app is signed ad-hoc, and downloaded copies need `xattr -dr com.apple.quarantine Celiador.app` before first launch. Windows builds are unsigned, so SmartScreen warns on install.
+
 ## Layout
 
 - `extensions/celiador-ai/` — the built-in AI extension (chat + agent, wired to the daemon). A normal source extension; the vscode build packages its compiled `out/`.
