@@ -4,7 +4,7 @@ import { getRestrictedSetting } from "./config";
 import { resolveInWorkspace, isProtectedPath } from "./paths";
 import { parseSSELine, splitSSEBuffer } from "./sse";
 import { CeliadorChatProvider, VENDOR } from "./provider";
-import { SessionRelay, SessionEvent } from "./relay";
+import { SessionRelay } from "./relay";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -351,28 +351,35 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
         if (!text || this.running) return;
         const root = workspaceRoot();
         
-        const emit: Emit = (msg) => {
-          webviewView.webview.postMessage(msg);
-          if (this.relay && msg.type !== "running") {
-            void this.relay.postEvent(msg as SessionEvent);
-          }
-        };
-        
-        if (!root) { emit({ type: "reply", text: "Open a folder first — the agent works on files in your workspace." }); return; }
+        if (!root) {
+          webviewView.webview.postMessage({ type: "reply", text: "Open a folder first — the agent works on files in your workspace." });
+          return;
+        }
 
         // Start session relay if signed in
         if (auth && await auth.isSignedIn()) {
           const { url } = daemonConfig();
           this.relay?.dispose();
           this.relay = new SessionRelay(url, auth, (cmd) => {
-            // Handle phone commands
-            if (cmd.type === "cancel") {
+            if (cmd.kind === "cancel") {
               this.controller?.abort();
+            } else if (cmd.kind === "instruct") {
+              // Queue new turn from phone
+              webviewView.webview.postMessage({ type: "phone-message", text: cmd.text });
             }
-            // TODO: Handle approve/reject/answer/message commands
           });
-          await this.relay.createSession(text.slice(0, 100));
+          const sessionId = await this.relay.createSession(text.slice(0, 100));
+          if (sessionId) {
+            await this.relay.postUserMessage(text);
+          }
         }
+
+        const emit: Emit = (msg) => {
+          webviewView.webview.postMessage(msg);
+          if (this.relay) {
+            void this.relay.handleEditorEvent(msg);
+          }
+        };
 
         this.running = true;
         emit({ type: "running", value: true });
@@ -386,6 +393,14 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
           changed: new Set<string>(),
           ensureWrite: async (rel) => {
             if (autoApprove || approveAll) return true;
+
+            // Try phone approval first if relay exists
+            if (this.relay) {
+              const approved = await this.relay.requestApproval(rel);
+              if (approved) return true;
+            }
+
+            // Fall back to editor UI
             const choice = await vscode.window.showWarningMessage(
               `Celiador wants to write:\n${rel}`,
               { modal: true, detail: "Applied to your working tree — review it in source control." },
@@ -400,8 +415,18 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
         try {
           await runAgentTurn(this.messages, emit, this.controller.signal, ctx);
         } catch (err: any) {
-          if (this.controller.signal.aborted) emit({ type: "reply", text: "(Stopped.)" });
-          else emit({ type: "reply", text: `Error: ${err?.message ?? err}` });
+          if (this.controller.signal.aborted) {
+            emit({ type: "reply", text: "(Stopped.)" });
+            if (this.relay) {
+              await this.relay.postState("cancelled");
+            }
+          } else {
+            emit({ type: "reply", text: `Error: ${err?.message ?? err}` });
+            if (this.relay) {
+              await this.relay.postEvent({ kind: "error", message: err?.message ?? String(err) });
+              await this.relay.postState("error");
+            }
+          }
         } finally {
           if (ctx.changed.size) emit({ type: "reply", text: `Changed ${ctx.changed.size} file(s): ${[...ctx.changed].join(", ")}` });
           this.running = false;

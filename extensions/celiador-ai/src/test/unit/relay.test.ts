@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { SessionRelay, SessionEvent, PhoneCommand } from "../../relay";
+import { SessionRelay, SessionEventInput, SessionCommand } from "../../relay";
 
 // Mock Auth class for testing
 class MockAuth {
@@ -23,235 +23,365 @@ class MockAuth {
   }
 }
 
-describe("SessionRelay Event Mapping", () => {
-  it("should map delta events to daemon format", () => {
-    const mockAuth = new MockAuth();
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
+describe("SessionRelay Daemon Protocol", () => {
+  describe("Event Mapping (Editor → Daemon)", () => {
+    it("should map delta events to daemon format with kind", async () => {
+      const mockAuth = new MockAuth();
+      let postedEvents: any[] = [];
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
 
-    // Access private method via type assertion for testing
-    const mapEvent = (relay as any).mapEventToDaemonFormat.bind(relay);
+      // Capture postEvent calls
+      (relay as any).postEvent = async (event: any) => {
+        postedEvents.push(event);
+      };
 
-    const deltaEvent: SessionEvent = {
-      type: "delta",
-      text: "Hello world",
-    };
+      await relay.handleEditorEvent({ type: "delta", text: "Hello world" });
 
-    const mapped = mapEvent(deltaEvent);
-    assert.strictEqual(mapped.type, "delta");
-    assert.strictEqual(mapped.text, "Hello world");
+      assert.strictEqual(postedEvents.length, 1);
+      assert.strictEqual(postedEvents[0].kind, "delta");
+      assert.strictEqual(postedEvents[0].text, "Hello world");
 
-    relay.dispose();
-  });
-
-  it("should map tool events to daemon format", () => {
-    const mockAuth = new MockAuth();
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
-
-    const mapEvent = (relay as any).mapEventToDaemonFormat.bind(relay);
-
-    const toolEvent: SessionEvent = {
-      type: "tool",
-      name: "read_file",
-      input: { path: "test.ts" },
-    };
-
-    const mapped = mapEvent(toolEvent);
-    assert.strictEqual(mapped.type, "tool");
-    assert.strictEqual(mapped.name, "read_file");
-    assert.deepStrictEqual(mapped.input, { path: "test.ts" });
-
-    relay.dispose();
-  });
-
-  it("should map toolResult events to daemon format", () => {
-    const mockAuth = new MockAuth();
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
-
-    const mapEvent = (relay as any).mapEventToDaemonFormat.bind(relay);
-
-    const toolResultEvent: SessionEvent = {
-      type: "toolResult",
-      name: "read_file",
-      ok: true,
-    };
-
-    const mapped = mapEvent(toolResultEvent);
-    assert.strictEqual(mapped.type, "toolResult");
-    assert.strictEqual(mapped.name, "read_file");
-    assert.strictEqual(mapped.success, true);
-
-    relay.dispose();
-  });
-
-  it("should map reply events to daemon format", () => {
-    const mockAuth = new MockAuth();
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
-
-    const mapEvent = (relay as any).mapEventToDaemonFormat.bind(relay);
-
-    const replyEvent: SessionEvent = {
-      type: "reply",
-      text: "Task completed",
-    };
-
-    const mapped = mapEvent(replyEvent);
-    assert.strictEqual(mapped.type, "reply");
-    assert.strictEqual(mapped.text, "Task completed");
-
-    relay.dispose();
-  });
-
-  it("should map done events to daemon format", () => {
-    const mockAuth = new MockAuth();
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
-
-    const mapEvent = (relay as any).mapEventToDaemonFormat.bind(relay);
-
-    const doneEvent: SessionEvent = {
-      type: "done",
-    };
-
-    const mapped = mapEvent(doneEvent);
-    assert.strictEqual(mapped.type, "done");
-
-    relay.dispose();
-  });
-});
-
-describe("SessionRelay Command Handling", () => {
-  it("should handle message commands", () => {
-    const mockAuth = new MockAuth();
-    let receivedCommand: PhoneCommand | undefined;
-
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
-      receivedCommand = cmd;
+      relay.dispose();
     });
 
-    const handleCommand = (relay as any).handleCommand.bind(relay);
+    it("should map tool events with callId", async () => {
+      const mockAuth = new MockAuth();
+      let postedEvents: any[] = [];
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
 
-    handleCommand({ type: "message", text: "Hello from phone" });
+      (relay as any).postEvent = async (event: any) => {
+        postedEvents.push(event);
+      };
 
-    assert.ok(receivedCommand);
-    assert.strictEqual(receivedCommand.type, "message");
-    assert.strictEqual(receivedCommand.text, "Hello from phone");
+      await relay.handleEditorEvent({
+        type: "tool",
+        name: "read_file",
+        input: { path: "test.ts" },
+      });
 
-    relay.dispose();
-  });
+      assert.strictEqual(postedEvents.length, 1);
+      assert.strictEqual(postedEvents[0].kind, "tool");
+      assert.strictEqual(postedEvents[0].name, "read_file");
+      assert.ok(postedEvents[0].callId);
+      assert.ok(postedEvents[0].callId.startsWith("call_"));
+      assert.deepStrictEqual(postedEvents[0].input, { path: "test.ts" });
 
-  it("should handle approve commands", () => {
-    const mockAuth = new MockAuth();
-    let receivedCommand: PhoneCommand | undefined;
-
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
-      receivedCommand = cmd;
+      relay.dispose();
     });
 
-    const handleCommand = (relay as any).handleCommand.bind(relay);
+    it("should map toolResult events with callId and ok flag", async () => {
+      const mockAuth = new MockAuth();
+      let postedEvents: any[] = [];
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
 
-    handleCommand({ type: "approve" });
+      (relay as any).postEvent = async (event: any) => {
+        postedEvents.push(event);
+      };
 
-    assert.ok(receivedCommand);
-    assert.strictEqual(receivedCommand.type, "approve");
+      // First post tool to get callId
+      await relay.handleEditorEvent({
+        type: "tool",
+        name: "read_file",
+        input: {},
+      });
 
-    relay.dispose();
-  });
+      // Then post toolResult
+      await relay.handleEditorEvent({
+        type: "toolResult",
+        name: "read_file",
+        ok: true,
+      });
 
-  it("should handle reject commands", () => {
-    const mockAuth = new MockAuth();
-    let receivedCommand: PhoneCommand | undefined;
+      assert.strictEqual(postedEvents.length, 2);
+      const toolResultEvent = postedEvents[1];
+      assert.strictEqual(toolResultEvent.kind, "toolResult");
+      assert.strictEqual(toolResultEvent.callId, postedEvents[0].callId);
+      assert.strictEqual(toolResultEvent.ok, true);
+      assert.strictEqual(toolResultEvent.success, undefined); // Daemon uses 'ok' not 'success'
 
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
-      receivedCommand = cmd;
+      relay.dispose();
     });
 
-    const handleCommand = (relay as any).handleCommand.bind(relay);
+    it("should map reply events to message with role assistant", async () => {
+      const mockAuth = new MockAuth();
+      let postedEvents: any[] = [];
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
 
-    handleCommand({ type: "reject" });
+      (relay as any).postEvent = async (event: any) => {
+        postedEvents.push(event);
+      };
 
-    assert.ok(receivedCommand);
-    assert.strictEqual(receivedCommand.type, "reject");
+      await relay.handleEditorEvent({
+        type: "reply",
+        text: "Task completed",
+      });
 
-    relay.dispose();
-  });
+      assert.strictEqual(postedEvents.length, 1);
+      assert.strictEqual(postedEvents[0].kind, "message");
+      assert.strictEqual(postedEvents[0].role, "assistant");
+      assert.strictEqual(postedEvents[0].text, "Task completed");
 
-  it("should handle answer commands", () => {
-    const mockAuth = new MockAuth();
-    let receivedCommand: PhoneCommand | undefined;
-
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
-      receivedCommand = cmd;
+      relay.dispose();
     });
 
-    const handleCommand = (relay as any).handleCommand.bind(relay);
+    it("should map done events to state done + done event", async () => {
+      const mockAuth = new MockAuth();
+      let postedEvents: any[] = [];
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
 
-    handleCommand({ type: "answer", text: "42" });
+      (relay as any).postEvent = async (event: any) => {
+        postedEvents.push(event);
+      };
 
-    assert.ok(receivedCommand);
-    assert.strictEqual(receivedCommand.type, "answer");
-    assert.strictEqual(receivedCommand.text, "42");
+      await relay.handleEditorEvent({ type: "done" });
 
-    relay.dispose();
-  });
+      assert.strictEqual(postedEvents.length, 2);
+      assert.strictEqual(postedEvents[0].kind, "state");
+      assert.strictEqual(postedEvents[0].state, "done");
+      assert.strictEqual(postedEvents[1].kind, "done");
 
-  it("should handle cancel commands", () => {
-    const mockAuth = new MockAuth();
-    let receivedCommand: PhoneCommand | undefined;
-
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
-      receivedCommand = cmd;
+      relay.dispose();
     });
 
-    const handleCommand = (relay as any).handleCommand.bind(relay);
+    it("should map running event to state running", async () => {
+      const mockAuth = new MockAuth();
+      let postedEvents: any[] = [];
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
 
-    handleCommand({ type: "cancel" });
+      (relay as any).postEvent = async (event: any) => {
+        postedEvents.push(event);
+      };
 
-    assert.ok(receivedCommand);
-    assert.strictEqual(receivedCommand.type, "cancel");
+      await relay.handleEditorEvent({ type: "running", value: true });
 
-    relay.dispose();
+      assert.strictEqual(postedEvents.length, 1);
+      assert.strictEqual(postedEvents[0].kind, "state");
+      assert.strictEqual(postedEvents[0].state, "running");
+
+      relay.dispose();
+    });
   });
 
-  it("should ignore unknown command types", () => {
-    const mockAuth = new MockAuth();
-    let receivedCommand: PhoneCommand | undefined;
+  describe("Command Parsing (Daemon → Editor)", () => {
+    it("should parse instruct commands with kind", () => {
+      const mockAuth = new MockAuth();
+      let receivedCommand: SessionCommand | undefined;
 
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
-      receivedCommand = cmd;
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
+        receivedCommand = cmd;
+      });
+
+      const handleCommand = (relay as any).handleCommand.bind(relay);
+      handleCommand({ kind: "instruct", text: "Hello from phone" });
+
+      assert.ok(receivedCommand);
+      assert.strictEqual(receivedCommand.kind, "instruct");
+      assert.strictEqual((receivedCommand as any).text, "Hello from phone");
+
+      relay.dispose();
     });
 
-    const handleCommand = (relay as any).handleCommand.bind(relay);
+    it("should parse approve commands with requestId", () => {
+      const mockAuth = new MockAuth();
+      let receivedCommand: SessionCommand | undefined;
 
-    handleCommand({ type: "unknown" });
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
+        receivedCommand = cmd;
+      });
 
-    assert.strictEqual(receivedCommand, undefined);
+      const handleCommand = (relay as any).handleCommand.bind(relay);
+      handleCommand({ kind: "approve", requestId: "req_123" });
 
-    relay.dispose();
+      assert.ok(receivedCommand);
+      assert.strictEqual(receivedCommand.kind, "approve");
+      assert.strictEqual((receivedCommand as any).requestId, "req_123");
+
+      relay.dispose();
+    });
+
+    it("should parse reject commands with requestId", () => {
+      const mockAuth = new MockAuth();
+      let receivedCommand: SessionCommand | undefined;
+
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
+        receivedCommand = cmd;
+      });
+
+      const handleCommand = (relay as any).handleCommand.bind(relay);
+      handleCommand({ kind: "reject", requestId: "req_456" });
+
+      assert.ok(receivedCommand);
+      assert.strictEqual(receivedCommand.kind, "reject");
+      assert.strictEqual((receivedCommand as any).requestId, "req_456");
+
+      relay.dispose();
+    });
+
+    it("should parse answer commands with requestId and text", () => {
+      const mockAuth = new MockAuth();
+      let receivedCommand: SessionCommand | undefined;
+
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
+        receivedCommand = cmd;
+      });
+
+      const handleCommand = (relay as any).handleCommand.bind(relay);
+      handleCommand({ kind: "answer", requestId: "req_789", text: "42" });
+
+      assert.ok(receivedCommand);
+      assert.strictEqual(receivedCommand.kind, "answer");
+      assert.strictEqual((receivedCommand as any).requestId, "req_789");
+      assert.strictEqual((receivedCommand as any).text, "42");
+
+      relay.dispose();
+    });
+
+    it("should parse cancel commands", () => {
+      const mockAuth = new MockAuth();
+      let receivedCommand: SessionCommand | undefined;
+
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
+        receivedCommand = cmd;
+      });
+
+      const handleCommand = (relay as any).handleCommand.bind(relay);
+      handleCommand({ kind: "cancel" });
+
+      assert.ok(receivedCommand);
+      assert.strictEqual(receivedCommand.kind, "cancel");
+
+      relay.dispose();
+    });
+
+    it("should ignore commands without kind field", () => {
+      const mockAuth = new MockAuth();
+      let receivedCommand: SessionCommand | undefined;
+
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, (cmd) => {
+        receivedCommand = cmd;
+      });
+
+      const handleCommand = (relay as any).handleCommand.bind(relay);
+      handleCommand({ type: "message" }); // Wrong field name
+
+      assert.strictEqual(receivedCommand, undefined);
+
+      relay.dispose();
+    });
   });
-});
 
-describe("SessionRelay Lifecycle", () => {
-  it("should not post events after dispose", async () => {
-    const mockAuth = new MockAuth();
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
+  describe("Full Turn Sequence", () => {
+    it("should post correct event sequence for a complete turn", async () => {
+      const mockAuth = new MockAuth();
+      const postedEvents: SessionEventInput[] = [];
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
 
-    relay.dispose();
+      // Capture all postEvent calls
+      (relay as any).postEvent = async (event: SessionEventInput) => {
+        postedEvents.push(event);
+      };
 
-    // Should not throw or crash
-    await relay.postEvent({ type: "delta", text: "test" });
+      // Simulate a complete turn
+      await relay.postUserMessage("Read test.ts");
+      await relay.handleEditorEvent({ type: "running", value: true });
+      await relay.handleEditorEvent({ type: "delta", text: "I'll " });
+      await relay.handleEditorEvent({ type: "delta", text: "read that file." });
+      await relay.handleEditorEvent({
+        type: "tool",
+        name: "read_file",
+        input: { path: "test.ts" },
+      });
+      await relay.handleEditorEvent({
+        type: "toolResult",
+        name: "read_file",
+        ok: true,
+      });
+      await relay.handleEditorEvent({
+        type: "reply",
+        text: "Here's the content.",
+      });
+      await relay.handleEditorEvent({ type: "done" });
 
-    assert.ok(true, "dispose prevents further operations");
+      // Verify exact sequence
+      assert.strictEqual(postedEvents.length, 9);
+
+      // User message
+      assert.strictEqual(postedEvents[0].kind, "message");
+      assert.strictEqual((postedEvents[0] as any).role, "user");
+      assert.strictEqual((postedEvents[0] as any).text, "Read test.ts");
+
+      // State running
+      assert.strictEqual(postedEvents[1].kind, "state");
+      assert.strictEqual((postedEvents[1] as any).state, "running");
+
+      // Delta 1
+      assert.strictEqual(postedEvents[2].kind, "delta");
+      assert.strictEqual((postedEvents[2] as any).text, "I'll ");
+
+      // Delta 2
+      assert.strictEqual(postedEvents[3].kind, "delta");
+      assert.strictEqual((postedEvents[3] as any).text, "read that file.");
+
+      // Tool call
+      assert.strictEqual(postedEvents[4].kind, "tool");
+      assert.ok((postedEvents[4] as any).callId);
+      assert.strictEqual((postedEvents[4] as any).name, "read_file");
+      assert.deepStrictEqual((postedEvents[4] as any).input, { path: "test.ts" });
+
+      // Tool result
+      assert.strictEqual(postedEvents[5].kind, "toolResult");
+      assert.strictEqual((postedEvents[5] as any).callId, (postedEvents[4] as any).callId);
+      assert.strictEqual((postedEvents[5] as any).ok, true);
+
+      // Assistant message
+      assert.strictEqual(postedEvents[6].kind, "message");
+      assert.strictEqual((postedEvents[6] as any).role, "assistant");
+      assert.strictEqual((postedEvents[6] as any).text, "Here's the content.");
+
+      // State done
+      assert.strictEqual(postedEvents[7].kind, "state");
+      assert.strictEqual((postedEvents[7] as any).state, "done");
+
+      // Done event
+      assert.strictEqual(postedEvents[8].kind, "done");
+
+      relay.dispose();
+    });
   });
 
-  it("should abort streams on dispose", () => {
-    const mockAuth = new MockAuth();
-    const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
+  describe("Approval Workflow", () => {
+    it("should emit approval event with requestId and transition to awaiting state", async () => {
+      const mockAuth = new MockAuth();
+      const postedEvents: SessionEventInput[] = [];
+      const relay = new SessionRelay("https://test.celiador.ai", mockAuth as any, () => {});
 
-    // Set up a mock commands stream
-    (relay as any).commandsAbort = { abort: () => {} };
+      (relay as any).postEvent = async (event: SessionEventInput) => {
+        postedEvents.push(event);
+      };
 
-    relay.dispose();
+      // Start approval request (don't await - would block)
+      const approvalPromise = relay.requestApproval("src/test.ts", "preview content");
 
-    assert.strictEqual((relay as any).commandsAbort, undefined);
-    assert.strictEqual((relay as any).disposed, true);
+      // Let the approval event post
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Should have posted state awaiting and approval event
+      assert.ok(postedEvents.some((e) => e.kind === "state" && (e as any).state === "awaiting"));
+      const approvalEvent = postedEvents.find((e) => e.kind === "approval");
+      assert.ok(approvalEvent);
+      assert.strictEqual((approvalEvent as any).approvalKind, "write_file");
+      assert.strictEqual((approvalEvent as any).path, "src/test.ts");
+      assert.strictEqual((approvalEvent as any).preview, "preview content");
+      assert.ok((approvalEvent as any).requestId);
+
+      // Simulate phone approval
+      const handleCommand = (relay as any).handleCommand.bind(relay);
+      handleCommand({ kind: "approve", requestId: (approvalEvent as any).requestId });
+
+      const approved = await approvalPromise;
+      assert.strictEqual(approved, true);
+
+      relay.dispose();
+    });
   });
 });
