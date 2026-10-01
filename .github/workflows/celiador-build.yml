@@ -53,6 +53,20 @@ jobs:
         with:
           lfs: true
 
+      - name: Free disk space
+        run: |
+          echo "=== Disk usage before cleanup ==="
+          df -h
+          echo "=== Removing unnecessary tools ==="
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get autoremove -y
+          sudo apt-get clean
+          echo "=== Disk usage after cleanup ==="
+          df -h
+
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -104,6 +118,15 @@ jobs:
       - name: Save node_modules cache
         if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
         uses: ./.github/actions/save-node-modules
+
+      - name: Clean up cache archive to free disk space
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
+        run: |
+          echo "=== Disk usage before removing cache archive ==="
+          df -h
+          rm -f .build/node_modules_cache/node-modules.tzst
+          echo "=== Disk usage after removing cache archive ==="
+          df -h
 
       - name: Download built-in extensions
         run: node build/lib/builtInExtensions.ts
