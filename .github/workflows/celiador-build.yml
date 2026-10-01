@@ -102,7 +102,7 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
 
       - name: Save node_modules cache
-        if: steps.cache-node-modules.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.head_ref == 'cursor/restore-activate-and-fix-cache-5658')
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
         uses: ./.github/actions/save-node-modules
 
       - name: Download built-in extensions
@@ -198,7 +198,7 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
 
       - name: Save node_modules cache
-        if: steps.cache-node-modules.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.head_ref == 'cursor/restore-activate-and-fix-cache-5658')
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
         uses: ./.github/actions/save-node-modules
 
       - name: Download built-in extensions
@@ -281,7 +281,7 @@ jobs:
           GYP_DEFINES: "kerberos_use_rtld=false"
 
       - name: Save node_modules cache
-        if: steps.cache-node-modules.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.head_ref == 'cursor/restore-activate-and-fix-cache-5658')
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
         uses: ./.github/actions/save-node-modules
 
       - name: Download built-in extensions
