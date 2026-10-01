@@ -394,7 +394,7 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private html(webview: vscode.Webview): string {
+  private html(_webview: vscode.Webview): string {
     const nonce = String(Date.now()) + Math.floor(Math.random() * 1e6);
     return `<!DOCTYPE html>
 <html lang="en">
@@ -465,4 +465,171 @@ class CeliadorChatViewProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
   }
+}
+
+export function activate(context: vscode.ExtensionContext): void {
+  console.log("[celiador-ai] activated");
+  secretStore = context.secrets;
+  auth = new Auth(context.secrets);
+  const provider = new CeliadorChatViewProvider();
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider("celiador.chat", provider));
+
+  // Register the Celiador language model provider for chat / agent mode.
+  const balanceStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  balanceStatus.command = "celiador.manageBilling";
+  const refreshBalance = async () => {
+    const me = await fetchMe();
+    if (!me) {
+      balanceStatus.hide();
+      return;
+    }
+    const balance = me.balance;
+    balanceStatus.text = `$(sparkle) $${balance.remainingUsd.toFixed(2)}`;
+    balanceStatus.tooltip =
+      `Celiador ${balance.planLabel} — $${balance.remainingUsd.toFixed(2)} left ` +
+      `($${balance.spentUsd.toFixed(2)} of $${balance.includedUsd.toFixed(2)} included this period` +
+      `${balance.topUpUsd > 0 ? `, plus $${balance.topUpUsd.toFixed(2)} credits` : ""}).\nClick to manage billing.`;
+    balanceStatus.show();
+  };
+  context.subscriptions.push(balanceStatus);
+
+  context.subscriptions.push(
+    vscode.lm.registerLanguageModelChatProvider(
+      VENDOR,
+      new CeliadorChatProvider(auth, context.secrets, () => void refreshBalance())
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.manageBilling", async () => {
+      const me = await fetchMe();
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: "Add credits", id: "credits", detail: "One-off top-up — no subscription change" },
+          { label: "Change plan", id: "plan", detail: "Upgrade, downgrade or cancel" },
+          { label: "Refresh balance", id: "refresh" },
+        ],
+        { placeHolder: me ? `${me.balance.planLabel} — $${me.balance.remainingUsd.toFixed(2)} left` : "Celiador billing" }
+      );
+      if (!pick) return;
+      if (pick.id === "refresh") return void refreshBalance();
+      if (pick.id === "plan") return void openBilling("portal", {});
+      return void openBilling("checkout", me?.balance.plan === "free" ? { plan: "builder" } : {});
+    })
+  );
+
+  // Capture the Supabase OAuth / magic-link deep link (celiador://…/auth-callback).
+  context.subscriptions.push(
+    vscode.window.registerUriHandler({
+      handleUri: async (uri) => {
+        if (!auth) return;
+        if (await auth.handleCallback(uri)) {
+          void vscode.window.showInformationMessage(`Signed in to Celiador as ${(await auth.currentEmail()) ?? "your account"}.`);
+        }
+      },
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.openChat", async () => {
+      await vscode.commands.executeCommand("workbench.action.chat.open");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.setApiKey", async () => {
+      const key = await vscode.window.showInputBox({ prompt: "Anthropic API key for Celiador", password: true, ignoreFocusOut: true });
+      if (key && key.trim()) {
+        await secretStore?.store("celiador.apiKey", key.trim());
+        void vscode.window.showInformationMessage("Celiador API key saved to the OS keychain.");
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.signIn", async () => {
+      if (!auth) return;
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: "Sign in — email & password", id: "password" },
+          { label: "Create account — email & password", id: "signup" },
+          { label: "Magic link (email)", id: "magic" },
+          { label: "GitHub", id: "github" },
+        ],
+        { placeHolder: "Sign in to Celiador" }
+      );
+      if (!pick) return;
+      try {
+        if (pick.id === "github") { await auth.signInWithGitHub(); return; }
+        const email = (await vscode.window.showInputBox({ prompt: "Email", ignoreFocusOut: true }))?.trim();
+        if (!email) return;
+        if (pick.id === "magic") {
+          await auth.sendMagicLink(email);
+          void vscode.window.showInformationMessage("Magic link sent — open the link in your email to finish signing in.");
+          return;
+        }
+        const password = await vscode.window.showInputBox({ prompt: "Password", password: true, ignoreFocusOut: true });
+        if (!password) return;
+        if (pick.id === "signup") {
+          const active = await auth.signUp(email, password);
+          void vscode.window.showInformationMessage(active ? "Account created and signed in." : "Account created — confirm via the email we sent, then sign in.");
+        } else {
+          await auth.signInWithPassword(email, password);
+          void vscode.window.showInformationMessage(`Signed in as ${email}.`);
+        }
+      } catch (err: any) {
+        void vscode.window.showErrorMessage(`Sign-in failed: ${err?.message ?? err}`);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.signOut", async () => {
+      await auth?.signOut();
+      void vscode.window.showInformationMessage("Signed out of Celiador.");
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.checkConnection", async () => {
+      try { void vscode.window.showInformationMessage(await probeDaemon()); }
+      catch (err: any) { void vscode.window.showErrorMessage(`Celiador daemon unreachable: ${err?.message ?? err}`); }
+    })
+  );
+
+  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  status.text = "$(sparkle) Celiador";
+  status.tooltip = "Open Celiador chat";
+  status.command = "celiador.openChat";
+  status.show();
+  context.subscriptions.push(status);
+
+  // Account status item — reflects signed-in state.
+  const authStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+  const updateAuthStatus = async () => {
+    const email = await auth?.currentEmail();
+    if (email) {
+      authStatus.text = `$(account) ${email}`;
+      authStatus.tooltip = "Celiador account — click to sign out";
+      authStatus.command = "celiador.signOut";
+    } else {
+      authStatus.text = "$(account) Sign in";
+      authStatus.tooltip = "Sign in to Celiador";
+      authStatus.command = "celiador.signIn";
+    }
+    authStatus.show();
+  };
+  context.subscriptions.push(
+    authStatus,
+    auth.onDidChange(() => {
+      void updateAuthStatus();
+      void refreshBalance();
+    })
+  );
+  void updateAuthStatus();
+  void refreshBalance();
+}
+
+export function deactivate(): void {
+  // Nothing to tear down: every disposable is on context.subscriptions.
 }
