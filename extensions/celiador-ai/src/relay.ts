@@ -57,6 +57,9 @@ export class SessionRelay {
   private toolCallIdMap = new Map<string, string>(); // toolName -> callId
   private pendingApprovals = new Map<string, ApprovalRequest>(); // requestId -> request
   private nextRequestId = 1;
+  private eventBatch: SessionEventInput[] = [];
+  private batchTimer: NodeJS.Timeout | undefined;
+  private batchDelayMs = 100;
 
   constructor(
     private daemonUrl: string,
@@ -95,8 +98,8 @@ export class SessionRelay {
         return undefined;
       }
 
-      const data = (await res.json()) as { id: string };
-      this.sessionId = data.id;
+      const data = (await res.json()) as { session: { id: string } };
+      this.sessionId = data.session.id;
       console.log(`[SessionRelay] Created session ${this.sessionId}`);
 
       void this.connectCommandsStream();
@@ -128,8 +131,9 @@ export class SessionRelay {
 
   /**
    * Post an event to the current session.
+   * Accepts single event or array of events.
    */
-  async postEvent(event: SessionEventInput): Promise<void> {
+  async postEvent(event: SessionEventInput | SessionEventInput[]): Promise<void> {
     if (!this.sessionId || this.disposed) return;
 
     const signedIn = await this.auth.isSignedIn();
@@ -149,10 +153,54 @@ export class SessionRelay {
       });
 
       if (!res.ok) {
-        console.error(`[SessionRelay] Failed to post event: ${res.status}`);
+        const text = await res.text().catch(() => "");
+        console.error(`[SessionRelay] Failed to post event: ${res.status} ${text}`);
       }
     } catch (err) {
       console.error(`[SessionRelay] Error posting event:`, err);
+    }
+  }
+
+  /**
+   * Batch an event for later posting.
+   * Deltas are batched; other events flush immediately.
+   */
+  private async batchEvent(event: SessionEventInput): Promise<void> {
+    if (event.kind === "delta") {
+      this.eventBatch.push(event);
+      
+      // Schedule flush if not already scheduled
+      if (!this.batchTimer) {
+        this.batchTimer = setTimeout(() => {
+          this.flushEventBatch();
+        }, this.batchDelayMs);
+      }
+    } else {
+      // Flush any pending deltas first
+      this.flushEventBatch();
+      // Then post this event immediately
+      await this.postEvent(event);
+    }
+  }
+
+  /**
+   * Flush batched events.
+   */
+  private flushEventBatch(): void {
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = undefined;
+    }
+
+    if (this.eventBatch.length === 0) return;
+
+    const batch = this.eventBatch.slice();
+    this.eventBatch = [];
+
+    if (batch.length === 1) {
+      void this.postEvent(batch[0]);
+    } else {
+      void this.postEvent(batch);
     }
   }
 
@@ -162,7 +210,8 @@ export class SessionRelay {
   async handleEditorEvent(event: EditorEvent): Promise<void> {
     switch (event.type) {
       case "delta":
-        await this.postEvent({
+        // Batch deltas for efficient posting
+        await this.batchEvent({
           kind: "delta",
           text: event.text || "",
         });
@@ -405,6 +454,9 @@ export class SessionRelay {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
     }
+
+    // Flush any pending event batch
+    this.flushEventBatch();
 
     // Reject all pending approvals
     for (const request of this.pendingApprovals.values()) {
