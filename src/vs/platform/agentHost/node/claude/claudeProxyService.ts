@@ -66,10 +66,17 @@ export interface IClaudeProxyHandle extends ILoopbackProxyHandle {
  *   the user's own credentials (`ANTHROPIC_API_KEY`, or a subscription OAuth
  *   token in `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`); no proxy is
  *   involved. The SDK's bundled `claude` CLI runs the turn.
+ * - `daemon`: Celiador-routed Claude. The SDK points `ANTHROPIC_BASE_URL` straight
+ *   at the Celiador daemon's first-party Anthropic gateway (`<daemon>/api/anthropic`)
+ *   with the user's Supabase access token as the auth token. The daemon holds the
+ *   real key, forces the model, caps tokens and charges per-user quota — so the
+ *   client never sees a credential. No local proxy is needed: the daemon gateway
+ *   is itself a full Anthropic-compatible endpoint.
  */
 export type ClaudeTransport =
 	| { readonly kind: 'proxy'; readonly handle: IClaudeProxyHandle }
-	| { readonly kind: 'native' };
+	| { readonly kind: 'native' }
+	| { readonly kind: 'daemon'; readonly baseUrl: string; readonly authToken: string };
 
 /**
  * A per-request credits report. CAPI returns the actual billed credits
