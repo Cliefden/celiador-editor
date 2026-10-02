@@ -34,6 +34,22 @@
     }
   },
   "contributes": {
+    "authentication": [
+      {
+        "id": "celiador",
+        "label": "Celiador",
+        "authorizationServerGlobs": [
+          "https://celiador.ai",
+          "https://celiador.ai/*",
+          "https://staging.celiador.ai",
+          "https://staging.celiador.ai/*",
+          "http://localhost:*",
+          "http://localhost:*/*",
+          "http://127.0.0.1:*",
+          "http://127.0.0.1:*/*"
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "celiador.openChat",
