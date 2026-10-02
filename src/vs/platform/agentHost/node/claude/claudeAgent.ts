@@ -70,6 +70,18 @@ const USER_AGENT_PREFIX = 'vscode_claude_code';
 /** Where a user goes to establish Claude credentials; the workbench labels the link. */
 const CLAUDE_SETUP_DOCS_URL = 'https://code.claude.com/docs/en/third-party-integrations';
 
+/** Celiador: daemon base URL when `product.celiadorDaemonUrl` is unset (dev/no-brand builds). */
+const CELIADOR_DAEMON_FALLBACK_URL = 'https://celiador.ai';
+
+/**
+ * Celiador: the single model row published when the daemon transport is active.
+ * The daemon forces the model server-side regardless of what the SDK sends, so
+ * the client never really picks one — this is a stable display entry. Its id is
+ * sent to the gateway and overridden there.
+ */
+const CELIADOR_DAEMON_MODEL_ID = 'claude-opus-4-8';
+const CELIADOR_DAEMON_MODEL_NAME = 'Claude (Celiador)';
+
 /**
  * Returns true if `m` is a Claude-family model that should be advertised
  * to clients picking a model for the Claude provider.
@@ -372,6 +384,14 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	private _githubToken: string | undefined;
 	private _proxyHandle: IClaudeProxyHandle | undefined;
 	private _serverToolHost: IAgentServerToolHost | undefined;
+
+	/**
+	 * Celiador: the user's Supabase access token, forwarded by the workbench for
+	 * the {@link _celiadorDaemonResource} protected resource. When set it makes the
+	 * daemon the active transport for every session (Celiador is daemon-first) and
+	 * publishes the daemon model catalog. Cleared on sign-out (empty token).
+	 */
+	private _daemonToken: string | undefined;
 
 	/**
 	 * Memoized teardown promise. Set on the first call to {@link shutdown},
@@ -730,7 +750,38 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		return [
 			{ ...copilotResource, required: false },
 			this._gitHubEndpointService.getRepoResource(),
+			// Celiador: the daemon gateway resource. The workbench forwards the user's
+			// Supabase token here (see the Celiador auth bridge); `required: false`
+			// keeps the window usable before sign-in (a signed-out window shows the
+			// Celiador sign-in surface rather than being gated off).
+			this._celiadorDaemonResource(),
 		];
+	}
+
+	/** Celiador: daemon base URL (no trailing slash) from product config, with a dev fallback. */
+	private _celiadorDaemonBaseUrl(): string {
+		return (this._productService.celiadorDaemonUrl ?? CELIADOR_DAEMON_FALLBACK_URL).replace(/\/+$/, '');
+	}
+
+	/** Celiador: the daemon's first-party Anthropic gateway (`<daemon>/api/anthropic`). */
+	private _celiadorDaemonGatewayUrl(): string {
+		return `${this._celiadorDaemonBaseUrl()}/api/anthropic`;
+	}
+
+	/**
+	 * Celiador: the daemon protected resource. Its `resource` is the gateway URL the
+	 * token is scoped to; `authorization_servers` names the daemon so the workbench's
+	 * Celiador auth provider can be matched to it.
+	 */
+	private _celiadorDaemonResource(): ProtectedResourceMetadata {
+		const base = this._celiadorDaemonBaseUrl();
+		return {
+			resource: `${base}/api/anthropic`,
+			resource_name: 'Celiador',
+			authorization_servers: [base],
+			scopes_supported: [],
+			required: false,
+		};
 	}
 
 	/**
@@ -744,6 +795,13 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	 * Copilot sign-in.
 	 */
 	private _ensureAuthenticated(model?: ModelSelection): ClaudeTransport {
+		// Celiador is daemon-first: once the user's Supabase token is present, every
+		// session routes through the daemon gateway, bypassing the Copilot/native
+		// model-provider routing entirely. The daemon holds the key, forces the model
+		// and charges quota, so no local proxy handle or native credential is needed.
+		if (this._daemonToken) {
+			return { kind: 'daemon', baseUrl: this._celiadorDaemonGatewayUrl(), authToken: this._daemonToken };
+		}
 		const transport = resolveClaudeSessionTransport({
 			model,
 			defaultMode: this._defaultTransportMode(),
@@ -763,6 +821,18 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	}
 
 	async authenticate(resource: string, token: string): Promise<boolean> {
+		// Celiador: the daemon gateway resource carries the user's Supabase token.
+		// Storing it flips every session onto the daemon transport and republishes
+		// the daemon model catalog; an empty token (sign-out) clears it.
+		if (resource === this._celiadorDaemonResource().resource) {
+			const next = token || undefined;
+			if (this._daemonToken !== next) {
+				this._daemonToken = next;
+				void this._startModelRefresh();
+				this._logService.info(next ? '[Claude] Celiador daemon token updated' : '[Claude] Celiador daemon token cleared');
+			}
+			return true;
+		}
 		if (resource === this._gitHubEndpointService.getRepoResource().resource) {
 			return true;
 		}
@@ -913,6 +983,15 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	 * explicit choice to make.
 	 */
 	private async _refreshModels(): Promise<void> {
+		// Celiador: daemon-first. When the Supabase token is present the catalog is the
+		// single daemon model — Copilot/native enumeration is skipped entirely (the
+		// daemon is the only backend and forces the model server-side).
+		if (this._daemonToken) {
+			this._models.set(this._daemonModels(), undefined);
+			this._logService.info('[Claude] Models refreshed (Celiador daemon).');
+			this._sdkSetupChannel.refresh();
+			return;
+		}
 		const tokenAtStart = this._githubToken;
 		// True only for a dev override, a dev bare import, or an already-cached SDK.
 		const canAttemptNative = await this._sdkService.canLoadWithoutDownload();
@@ -1015,6 +1094,22 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			.filter(isClaudeModel)
 			.sort((a, b) => Number(b.is_chat_default) - Number(a.is_chat_default))
 			.map(m => toAgentModelInfo(m, this.id));
+	}
+
+	/**
+	 * Celiador: the daemon catalog — a single row. The user doesn't choose a model
+	 * (the daemon forces it server-side), so this is one stable display entry whose
+	 * id is sent to the gateway and overridden there. Kept as a bare (non
+	 * provider-qualified) id so it routes through the daemon short-circuit in
+	 * {@link _ensureAuthenticated} rather than the provider-based transport logic.
+	 */
+	private _daemonModels(): readonly IAgentModelInfo[] {
+		return [{
+			provider: this.id,
+			id: CELIADOR_DAEMON_MODEL_ID,
+			name: CELIADOR_DAEMON_MODEL_NAME,
+			supportsVision: true,
+		}];
 	}
 
 	// #endregion
