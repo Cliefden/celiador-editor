@@ -3,6 +3,12 @@
 	"nameLong": "Celiador",
 	"applicationName": "celiador",
 	"celiadorDaemonUrl": "https://celiador.ai",
+	"agentSdks": {
+		"claude": {
+			"version": "0.3.258",
+			"urlTemplate": "https://celiador.ai/sdk/claude/0.3.258/{sdkTarget}.tgz"
+		}
+	},
 	"dataFolderName": ".celiador",
 	"sharedDataFolderName": ".celiador-shared",
 	"win32MutexName": "celiador",
