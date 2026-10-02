@@ -11,7 +11,7 @@
   "contributes": {
     "configurationDefaults": {
       "chat.disableAIFeatures": true,
-      "chat.agentHost.claudeAgent.enabled": false,
+      "chat.agentHost.claudeAgent.enabled": true,
       "chat.agentHost.codexAgent.enabled": false
     }
   },
