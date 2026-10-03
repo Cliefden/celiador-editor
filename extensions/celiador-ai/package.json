@@ -107,6 +107,11 @@
           "id": "celiador.chat",
           "name": "Chat",
           "type": "webview"
+        },
+        {
+          "id": "celiador.changes",
+          "name": "Changes",
+          "type": "webview"
         }
       ]
     },

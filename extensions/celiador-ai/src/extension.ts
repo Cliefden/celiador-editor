@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { Auth } from "./auth";
 import { registerCeliadorAuthProvider } from "./authProvider";
+import { CeliadorChangesViewProvider } from "./changesView";
 import { SessionRelay } from "./relay";
 import { DaemonApi } from "./api";
 import { resolveDaemonUrl } from "./productConfig";
@@ -641,6 +642,9 @@ export function activate(context: vscode.ExtensionContext): void {
   relay.onCancel = () => provider.cancel();
   context.subscriptions.push({ dispose: () => relay.dispose() });
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("celiador.chat", provider));
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(CeliadorChangesViewProvider.viewId, new CeliadorChangesViewProvider())
+  );
 
   // Expose the Supabase session as a VS Code authentication provider so the native
   // Agents Window can resolve a token for the daemon's `celiador-daemon` resource
