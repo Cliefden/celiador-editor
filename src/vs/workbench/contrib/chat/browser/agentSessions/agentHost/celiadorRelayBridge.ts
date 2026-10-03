@@ -221,6 +221,15 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				this._pendingApprovals.delete(action.toolCallId);
 				this._toolNameByCallId.delete(action.toolCallId);
 				break;
+			case ActionType.ChatInputRequested:
+				// The agent is asking the user something — relay it so the phone shows
+				// the question. (Answering it back is deferred with follow-up instructions.)
+				client.publish({
+					kind: 'question',
+					requestId: action.request.id,
+					prompt: action.request.message || 'The agent needs your input.',
+				});
+				break;
 			case ActionType.ChatActivityChanged:
 				if (action.activity && action.activity.length > 0) {
 					client.publish({ kind: 'activity', text: action.activity });
