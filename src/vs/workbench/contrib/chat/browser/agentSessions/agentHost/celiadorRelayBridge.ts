@@ -8,7 +8,8 @@ import { URI } from '../../../../../../base/common/uri.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
-import { ActionEnvelope } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
+import { ActionEnvelope, ChatToolCallConfirmedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
+import { ToolCallCancellationReason, ToolCallConfirmationReason } from '../../../../../../platform/agentHost/common/state/protocol/channels-chat/state.js';
 import { SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
@@ -58,6 +59,10 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private readonly _watches = new Map<string, { readonly ref: IReference<IAgentSubscription<SessionState>>; readonly store: DisposableStore; chatChannel: string | undefined }>();
 	/** chat channel URI string → owning sessionResource.toString() (routes action events). */
 	private readonly _chatChannelToKey = new Map<string, string>();
+	/** toolCallId → tool display name (captured at ChatToolCallStart, used to label approvals). */
+	private readonly _toolNameByCallId = new Map<string, string>();
+	/** requestId (= toolCallId) → what a phone approve/deny must dispatch back. */
+	private readonly _pendingApprovals = new Map<string, { readonly chatChannel: string; readonly turnId: string; readonly toolCallId: string }>();
 
 	constructor(
 		@IAgentSessionsService private readonly _sessionsService: IAgentSessionsService,
@@ -143,6 +148,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			getToken: () => this._token(),
 			log: message => this._logService.trace(`[celiador-relay] ${message}`),
 			onCancel: () => { void this._chatService.cancelCurrentRequestForSession(resource, 'celiador-phone'); },
+			onApprovalDecision: (requestId, approved) => this._resolveApproval(requestId, approved),
 		});
 		this._clients.set(key, client);
 		this._watchSession(key, resource);
@@ -192,7 +198,28 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				}
 				break;
 			case ActionType.ChatToolCallStart:
+				this._toolNameByCallId.set(action.toolCallId, action.toolName);
 				client.publish({ kind: 'tool', callId: action.toolCallId, name: action.toolName, input: {} });
+				break;
+			case ActionType.ChatToolCallReady:
+				// `confirmed` unset → the tool is waiting for user approval. Relay it so
+				// the phone can approve/deny; a set `confirmed` means it auto-approved.
+				if (action.confirmed === undefined) {
+					const title = action.confirmationTitle ?? action.invocationMessage;
+					this._pendingApprovals.set(action.toolCallId, { chatChannel: envelope.channel.toString(), turnId: action.turnId, toolCallId: action.toolCallId });
+					client.publish({
+						kind: 'approval',
+						requestId: action.toolCallId,
+						approvalKind: this._toolNameByCallId.get(action.toolCallId) ?? 'tool',
+						title: typeof title === 'string' ? title : title.markdown,
+					});
+				}
+				break;
+			case ActionType.ChatToolCallConfirmed:
+			case ActionType.ChatToolCallComplete:
+				// Resolved (locally or remotely) — drop any stale pending approval.
+				this._pendingApprovals.delete(action.toolCallId);
+				this._toolNameByCallId.delete(action.toolCallId);
 				break;
 			case ActionType.ChatActivityChanged:
 				if (action.activity && action.activity.length > 0) {
@@ -200,6 +227,19 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				}
 				break;
 		}
+	}
+
+	/** A phone approve/deny arrived: dispatch the matching tool-call confirmation back to the agent. */
+	private _resolveApproval(requestId: string, approved: boolean): void {
+		const pending = this._pendingApprovals.get(requestId);
+		if (!pending) {
+			return;
+		}
+		this._pendingApprovals.delete(requestId);
+		const action: ChatToolCallConfirmedAction = approved
+			? { type: ActionType.ChatToolCallConfirmed, approved: true, confirmed: ToolCallConfirmationReason.UserAction, turnId: pending.turnId, toolCallId: pending.toolCallId }
+			: { type: ActionType.ChatToolCallConfirmed, approved: false, reason: ToolCallCancellationReason.Denied, turnId: pending.turnId, toolCallId: pending.toolCallId };
+		this._agentHostService.dispatch(pending.chatChannel, action);
 	}
 
 	/** Publish a status change; only once the relay session is live, and only on change. */
@@ -235,6 +275,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		if (watch) {
 			if (watch.chatChannel) {
 				this._chatChannelToKey.delete(watch.chatChannel);
+				// Drop pending approvals that belonged to this session's chat channel.
+				for (const [requestId, pending] of this._pendingApprovals) {
+					if (pending.chatChannel === watch.chatChannel) {
+						this._pendingApprovals.delete(requestId);
+					}
+				}
 			}
 			watch.store.dispose();
 			this._watches.delete(key);
@@ -253,6 +299,8 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		this._watches.clear();
 		this._lastStatus.clear();
 		this._chatChannelToKey.clear();
+		this._toolNameByCallId.clear();
+		this._pendingApprovals.clear();
 		super.dispose();
 	}
 }
