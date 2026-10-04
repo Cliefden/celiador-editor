@@ -47,8 +47,10 @@ export interface ICeliadorRelayClientOptions {
 	readonly getToken: () => Promise<string | undefined>;
 	/** Best-effort logger for dropped batches / transient failures. */
 	readonly log?: (message: string) => void;
-	/** A remote follow-up instruction (or answer) arrived from the phone. */
+	/** A remote follow-up instruction arrived from the phone. */
 	readonly onInstruct?: (text: string) => void;
+	/** An answer to a pending question arrived from the phone (carries the request id). */
+	readonly onAnswer?: (requestId: string, text: string) => void;
 	/** The run was cancelled from the phone. */
 	readonly onCancel?: () => void;
 	/** The phone approved (true) or rejected (false) a pending request. */
@@ -266,9 +268,15 @@ export class CeliadorRelayClient extends Disposable {
 	}
 
 	private _handleCommand(cmd: IRelayCommand): void {
-		if ((cmd.kind === 'instruct' || cmd.kind === 'answer') && typeof cmd.text === 'string') {
-			// An answer to an end-of-turn question is just the next instruction.
+		if (cmd.kind === 'instruct' && typeof cmd.text === 'string') {
 			this._options.onInstruct?.(cmd.text);
+		} else if (cmd.kind === 'answer' && typeof cmd.text === 'string') {
+			// Answer a pending question when we can target it; else treat as an instruction.
+			if (cmd.requestId) {
+				this._options.onAnswer?.(cmd.requestId, cmd.text);
+			} else {
+				this._options.onInstruct?.(cmd.text);
+			}
 		} else if (cmd.kind === 'cancel') {
 			this._options.onCancel?.();
 		} else if ((cmd.kind === 'approve' || cmd.kind === 'reject') && cmd.requestId) {

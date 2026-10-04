@@ -5,11 +5,12 @@
 
 import { Disposable, DisposableStore, IReference } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import { generateUuid } from '../../../../../../base/common/uuid.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
-import { ActionEnvelope, ChatToolCallConfirmedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
-import { ToolCallCancellationReason, ToolCallConfirmationReason } from '../../../../../../platform/agentHost/common/state/protocol/channels-chat/state.js';
+import { ActionEnvelope, ChatInputCompletedAction, ChatToolCallConfirmedAction, ChatTurnStartedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
+import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputResponseKind, MessageKind, ToolCallCancellationReason, ToolCallConfirmationReason } from '../../../../../../platform/agentHost/common/state/protocol/channels-chat/state.js';
 import { SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
@@ -63,6 +64,8 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private readonly _toolNameByCallId = new Map<string, string>();
 	/** requestId (= toolCallId) → what a phone approve/deny must dispatch back. */
 	private readonly _pendingApprovals = new Map<string, { readonly chatChannel: string; readonly turnId: string; readonly toolCallId: string }>();
+	/** input request id → what a phone answer must dispatch back. */
+	private readonly _pendingQuestions = new Map<string, { readonly chatChannel: string; readonly questionId: string }>();
 
 	constructor(
 		@IAgentSessionsService private readonly _sessionsService: IAgentSessionsService,
@@ -149,6 +152,8 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			log: message => this._logService.trace(`[celiador-relay] ${message}`),
 			onCancel: () => { void this._chatService.cancelCurrentRequestForSession(resource, 'celiador-phone'); },
 			onApprovalDecision: (requestId, approved) => this._resolveApproval(requestId, approved),
+			onInstruct: (text) => this._sendInstruction(key, text),
+			onAnswer: (requestId, text) => this._answerQuestion(requestId, text),
 		});
 		this._clients.set(key, client);
 		this._watchSession(key, resource);
@@ -221,14 +226,23 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				this._pendingApprovals.delete(action.toolCallId);
 				this._toolNameByCallId.delete(action.toolCallId);
 				break;
-			case ActionType.ChatInputRequested:
-				// The agent is asking the user something — relay it so the phone shows
-				// the question. (Answering it back is deferred with follow-up instructions.)
+			case ActionType.ChatInputRequested: {
+				// The agent is asking the user something — relay it so the phone shows the
+				// question, and remember the first question id so a phone answer can target it.
+				const request = action.request;
+				const questionId = request.questions?.[0]?.id;
+				if (questionId) {
+					this._pendingQuestions.set(request.id, { chatChannel: envelope.channel.toString(), questionId });
+				}
 				client.publish({
 					kind: 'question',
-					requestId: action.request.id,
-					prompt: action.request.message || 'The agent needs your input.',
+					requestId: request.id,
+					prompt: request.message || request.questions?.[0]?.message || 'The agent needs your input.',
 				});
+				break;
+			}
+			case ActionType.ChatInputCompleted:
+				this._pendingQuestions.delete(action.requestId);
 				break;
 			case ActionType.ChatActivityChanged:
 				if (action.activity && action.activity.length > 0) {
@@ -248,6 +262,42 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		const action: ChatToolCallConfirmedAction = approved
 			? { type: ActionType.ChatToolCallConfirmed, approved: true, confirmed: ToolCallConfirmationReason.UserAction, turnId: pending.turnId, toolCallId: pending.toolCallId }
 			: { type: ActionType.ChatToolCallConfirmed, approved: false, reason: ToolCallCancellationReason.Denied, turnId: pending.turnId, toolCallId: pending.toolCallId };
+		this._agentHostService.dispatch(pending.chatChannel, action);
+	}
+
+	/** A phone follow-up arrived: start a new user turn on the session's chat channel. */
+	private _sendInstruction(key: string, text: string): void {
+		const chatChannel = this._watches.get(key)?.chatChannel;
+		if (!chatChannel || !text.trim()) {
+			return;
+		}
+		const action: ChatTurnStartedAction = {
+			type: ActionType.ChatTurnStarted,
+			turnId: generateUuid(),
+			startedAt: new Date().toISOString(),
+			message: { text, origin: { kind: MessageKind.User } },
+		};
+		this._agentHostService.dispatch(chatChannel, action);
+	}
+
+	/** A phone answer arrived: complete the pending input request with the text as the answer. */
+	private _answerQuestion(requestId: string, text: string): void {
+		const pending = this._pendingQuestions.get(requestId);
+		if (!pending) {
+			return;
+		}
+		this._pendingQuestions.delete(requestId);
+		const action: ChatInputCompletedAction = {
+			type: ActionType.ChatInputCompleted,
+			requestId,
+			response: ChatInputResponseKind.Accept,
+			answers: {
+				[pending.questionId]: {
+					state: ChatInputAnswerState.Submitted,
+					value: { kind: ChatInputAnswerValueKind.Text, value: text },
+				},
+			},
+		};
 		this._agentHostService.dispatch(pending.chatChannel, action);
 	}
 
@@ -284,10 +334,15 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		if (watch) {
 			if (watch.chatChannel) {
 				this._chatChannelToKey.delete(watch.chatChannel);
-				// Drop pending approvals that belonged to this session's chat channel.
+				// Drop pending approvals/questions that belonged to this session's chat channel.
 				for (const [requestId, pending] of this._pendingApprovals) {
 					if (pending.chatChannel === watch.chatChannel) {
 						this._pendingApprovals.delete(requestId);
+					}
+				}
+				for (const [requestId, pending] of this._pendingQuestions) {
+					if (pending.chatChannel === watch.chatChannel) {
+						this._pendingQuestions.delete(requestId);
 					}
 				}
 			}
@@ -310,6 +365,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		this._chatChannelToKey.clear();
 		this._toolNameByCallId.clear();
 		this._pendingApprovals.clear();
+		this._pendingQuestions.clear();
 		super.dispose();
 	}
 }
