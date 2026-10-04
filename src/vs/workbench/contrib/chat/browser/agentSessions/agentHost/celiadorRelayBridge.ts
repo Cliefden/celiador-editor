@@ -9,8 +9,8 @@ import { generateUuid } from '../../../../../../base/common/uuid.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
-import { ActionEnvelope, ChatInputCompletedAction, ChatToolCallConfirmedAction, ChatTurnStartedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
-import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputResponseKind, MessageKind, ToolCallCancellationReason, ToolCallConfirmationReason } from '../../../../../../platform/agentHost/common/state/protocol/channels-chat/state.js';
+import { ActionEnvelope, ChatInputCompletedAction, ChatPendingMessageSetAction, ChatToolCallConfirmedAction, ChatTurnStartedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
+import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputResponseKind, MessageKind, PendingMessageKind, ToolCallCancellationReason, ToolCallConfirmationReason } from '../../../../../../platform/agentHost/common/state/protocol/channels-chat/state.js';
 import { SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
@@ -265,17 +265,33 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		this._agentHostService.dispatch(pending.chatChannel, action);
 	}
 
-	/** A phone follow-up arrived: start a new user turn on the session's chat channel. */
+	/**
+	 * A phone follow-up arrived. If a turn is already running, queue it (the server
+	 * starts it as a new turn once the current one finishes); only when the session
+	 * is idle do we start a turn immediately — dispatching a second `ChatTurnStarted`
+	 * over a live turn would race the in-flight one.
+	 */
 	private _sendInstruction(key: string, text: string): void {
 		const chatChannel = this._watches.get(key)?.chatChannel;
 		if (!chatChannel || !text.trim()) {
+			return;
+		}
+		const message = { text, origin: { kind: MessageKind.User } };
+		if (this._lastStatus.get(key) === ChatSessionStatus.InProgress) {
+			const action: ChatPendingMessageSetAction = {
+				type: ActionType.ChatPendingMessageSet,
+				kind: PendingMessageKind.Queued,
+				id: generateUuid(),
+				message,
+			};
+			this._agentHostService.dispatch(chatChannel, action);
 			return;
 		}
 		const action: ChatTurnStartedAction = {
 			type: ActionType.ChatTurnStarted,
 			turnId: generateUuid(),
 			startedAt: new Date().toISOString(),
-			message: { text, origin: { kind: MessageKind.User } },
+			message,
 		};
 		this._agentHostService.dispatch(chatChannel, action);
 	}
