@@ -299,6 +299,13 @@ export class ModelPickerWidget extends Disposable {
 	}
 
 	private _requiresSetup(): boolean {
+		// Celiador: never surface the GitHub Copilot setup/sign-in hint in the model
+		// picker. Models come from the Celiador daemon after signing in via the
+		// `celiador` auth provider; while signed out the picker is simply empty rather
+		// than advertising Copilot. Upstream (Code - OSS) behaviour preserved below.
+		if (this._productService.nameShort !== 'Code - OSS') {
+			return false;
+		}
 		return modelPickerRequiresSetup({
 			entitlement: this._entitlementService.entitlement,
 			anonymous: this._entitlementService.anonymous,

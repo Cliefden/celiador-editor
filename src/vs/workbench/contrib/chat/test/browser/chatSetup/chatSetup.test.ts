@@ -190,6 +190,7 @@ suite('Chat setup strategy', () => {
 			{ isWorkspaceTrusted: () => true } as never,
 			undefined as never,
 			new TestConfigurationService(),
+			{ nameShort: 'Code - OSS' } as never, // productService — upstream identity so the Celiador no-op guard is bypassed here
 		);
 
 		const result = await setup.run({ setupStrategy: ChatSetupStrategy.SetupWithMicrosoftProvider, additionalScopes: ['repo'] });
@@ -288,6 +289,7 @@ suite('Chat setup dialog cancellation', () => {
 			{ isWorkspaceTrusted: () => true } as never,
 			undefined as never,
 			new TestConfigurationService(),
+			{ nameShort: 'Code - OSS' } as never, // productService — upstream identity so the Celiador no-op guard is bypassed here
 		);
 
 		const result = setup.run({ setupStrategy: ChatSetupStrategy.DefaultSetup, cancellationToken: cancellation.token });

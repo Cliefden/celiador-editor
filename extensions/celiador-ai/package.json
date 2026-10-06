@@ -82,6 +82,11 @@
     "views": {
       "celiador": [
         {
+          "id": "celiador.welcome",
+          "name": "Celiador",
+          "type": "webview"
+        },
+        {
           "id": "celiador.changes",
           "name": "Changes",
           "type": "webview"

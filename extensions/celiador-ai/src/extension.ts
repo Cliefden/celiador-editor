@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { Auth } from "./auth";
 import { registerCeliadorAuthProvider } from "./authProvider";
 import { CeliadorChangesViewProvider } from "./changesView";
+import { CeliadorWelcomeViewProvider } from "./welcomeView";
 import { DaemonApi } from "./api";
 import { resolveDaemonUrl } from "./productConfig";
 
@@ -30,6 +31,12 @@ async function probeDaemon(): Promise<string> {
 export function activate(context: vscode.ExtensionContext): void {
   console.log("[celiador-ai] activated");
   auth = new Auth(context.secrets);
+
+  // Welcome/account pane — always visible so the signed-out state invites sign-in
+  // (the Agents Window needs a Celiador token) instead of silently waiting.
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(CeliadorWelcomeViewProvider.viewId, new CeliadorWelcomeViewProvider(auth))
+  );
 
   // Git-review "Changes" view in the Celiador sidebar.
   context.subscriptions.push(

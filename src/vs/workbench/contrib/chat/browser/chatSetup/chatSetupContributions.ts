@@ -374,6 +374,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 						id: MenuId.AccountsContext,
 						group: '2_copilot',
 						when: ContextKeyExpr.and(
+							ContextKeyExpr.false(), // Celiador: Copilot sign-in is not used — authenticate via the `celiador` auth provider (Celiador sidebar). Never show this entry.
 							ChatContextKeys.Setup.hidden.negate(),
 							ChatContextKeys.Setup.disabledInWorkspace.negate(),
 							CONTEXT_DEFAULT_ACCOUNT_STATE.notEqualsTo(DefaultAccountStatus.Available), // hide only when signed in (a default GitHub account is present); still shown while signed out or before the account state resolves, incl. untrusted workspaces — no auth prompt
@@ -407,6 +408,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 						id: MenuId.TitleBarAdjacentCenter,
 						order: 0,
 						when: ContextKeyExpr.and(
+							ContextKeyExpr.false(), // Celiador: hide the Copilot title-bar "Sign In" — sign in via the Celiador sidebar (celiador-ai). Never show this entry.
 							IsWebContext.negate(),
 							ChatContextKeys.Entitlement.signedOut,
 							CONTEXT_DEFAULT_ACCOUNT_STATE.notEqualsTo(DefaultAccountStatus.Available), // hide only when signed in (a default GitHub account is present); still shown while signed out or before the account state resolves, incl. untrusted workspaces — no auth prompt
