@@ -54,6 +54,8 @@ class TestConfigurationService extends mock<IConfigurationService>() {
 
 class TestChatSessionsService extends mock<IChatSessionsService>() {
 	contribution: ResolvedChatSessionsExtensionPoint | undefined = editorInlineContribution;
+	/** Additional contributions, by type (Celiador: e.g. the Claude agent host). */
+	readonly extraContributions = new Map<string, ResolvedChatSessionsExtensionPoint>();
 	item: IChatSessionItem | undefined = agentHostItem;
 	error: Error | undefined;
 	readonly contributionLookups: string[] = [];
@@ -61,7 +63,7 @@ class TestChatSessionsService extends mock<IChatSessionsService>() {
 
 	override getChatSessionContribution(sessionType: string): ResolvedChatSessionsExtensionPoint | undefined {
 		this.contributionLookups.push(sessionType);
-		return this.contribution;
+		return this.extraContributions.get(sessionType) ?? (this.contribution?.type === sessionType ? this.contribution : undefined);
 	}
 
 	override async createNewChatSessionItem(sessionType: string, request: IChatNewSessionRequest): Promise<IChatSessionItem | undefined> {
@@ -176,6 +178,31 @@ suite('InlineChatSessionResolver', () => {
 			acquisitionCalls: [{ location: ChatAgentLocation.EditorInline, debugOwner: 'InlineChatSessionResolver#resolve' }],
 			localSessionCalls: [],
 		});
+	});
+
+	test('Celiador: prefers the Claude Agent Host session when it supports editor inline chat', async () => {
+		const claudeContribution: ResolvedChatSessionsExtensionPoint = { ...editorInlineContribution, type: SessionType.AgentHostClaude, name: 'Claude', displayName: 'Claude' };
+		chatSessionsService.extraContributions.set(SessionType.AgentHostClaude, claudeContribution);
+		chatService.agentHostReference = new TestModelReference();
+
+		const result = await resolver.resolve(CancellationToken.None, 'typescript', targetUri);
+
+		assert.deepStrictEqual({
+			sessionType: chatSessionsService.creationCalls[0]?.sessionType,
+			locksToClaude: result?.lockToAgent === claudeContribution,
+		}, {
+			sessionType: SessionType.AgentHostClaude,
+			locksToClaude: true,
+		});
+	});
+
+	test('Celiador: skips a Claude contribution that does not offer editor inline chat', async () => {
+		chatSessionsService.extraContributions.set(SessionType.AgentHostClaude, { ...editorInlineContribution, type: SessionType.AgentHostClaude, locations: [ChatAgentLocation.Chat] });
+		chatService.agentHostReference = new TestModelReference();
+
+		await resolver.resolve(CancellationToken.None, 'typescript', targetUri);
+
+		assert.strictEqual(chatSessionsService.creationCalls[0]?.sessionType, SessionType.AgentHostCopilot);
 	});
 
 	test('falls back to a local session when the contribution is missing', async () => {
