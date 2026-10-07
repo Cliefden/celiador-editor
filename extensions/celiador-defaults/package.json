@@ -1,7 +1,7 @@
 {
   "name": "celiador-defaults",
   "displayName": "Celiador Defaults",
-  "description": "Ships Celiador's default settings — enables the native agent (daemon-routed) for chat and inline edit, and turns off Microsoft telemetry/updates/walkthroughs for a clean Celiador first run.",
+  "description": "Ships Celiador's default settings — enables the native agent (daemon-routed) for chat and inline edit. (Telemetry needs no default: product.json configures no telemetry, so it is always off. Application-scoped settings such as update.mode cannot be defaulted from an extension.)",
   "version": "1.0.0",
   "publisher": "celiador",
   "license": "MIT",
@@ -13,10 +13,7 @@
       "chat.disableAIFeatures": false,
       "chat.agentHost.claudeAgent.enabled": true,
       "chat.agentHost.codexAgent.enabled": false,
-      "chat.inlineChat.agentHost.enabled": true,
-      "telemetry.telemetryLevel": "off",
-      "update.mode": "none",
-      "workbench.welcomePage.walkthroughs.openOnInstall": false
+      "chat.inlineChat.agentHost.enabled": true
     }
   },
   "repository": {
