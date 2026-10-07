@@ -3,9 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { VSBuffer } from '../../../../../../base/common/buffer.js';
 import { Disposable, DisposableStore, IReference } from '../../../../../../base/common/lifecycle.js';
+import { isEqualOrParent, joinPath } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
+import { IFileService } from '../../../../../../platform/files/common/files.js';
+import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
@@ -20,7 +24,7 @@ import { IChatService } from '../../../common/chatService/chatService.js';
 import { ChatSessionStatus } from '../../../common/chatSessionsService.js';
 import { isAgentHostTarget } from '../agentSessions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
-import { CeliadorRelayClient } from './celiadorRelayClient.js';
+import { CeliadorRelayClient, RelayFsKind } from './celiadorRelayClient.js';
 
 /**
  * Celiador: editor-as-runner relay bridge. Mirrors each live local agent-host
@@ -51,6 +55,8 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	/** Must match the auth provider id registered by the celiador-ai extension. */
 	private static readonly AUTH_PROVIDER_ID = 'celiador';
 	private static readonly FALLBACK_DAEMON_URL = 'https://celiador.ai';
+	/** Largest file we send to the phone as text; larger is returned truncated. */
+	private static readonly MAX_FILE_BYTES = 1_000_000;
 
 	/** sessionResource.toString() → the relay client mirroring it. */
 	private readonly _clients = new Map<string, CeliadorRelayClient>();
@@ -74,6 +80,8 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		@IChatService private readonly _chatService: IChatService,
 		@IProductService private readonly _productService: IProductService,
 		@ILogService private readonly _logService: ILogService,
+		@IFileService private readonly _fileService: IFileService,
+		@IWorkspaceContextService private readonly _workspaceService: IWorkspaceContextService,
 	) {
 		super();
 		// Accessing `.model` lazily resolves all session providers; its change event
@@ -154,6 +162,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			onApprovalDecision: (requestId, approved) => this._resolveApproval(requestId, approved),
 			onInstruct: (text) => this._sendInstruction(key, text),
 			onAnswer: (requestId, text) => this._answerQuestion(requestId, text),
+			onFsCommand: (kind, requestId, path, content) => { void this._handleFsCommand(key, kind, requestId, path, content); },
 		});
 		this._clients.set(key, client);
 		this._watchSession(key, resource);
@@ -315,6 +324,61 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			},
 		};
 		this._agentHostService.dispatch(pending.chatChannel, action);
+	}
+
+	/**
+	 * A phone file-browser request arrived (list / read / write). Perform it against
+	 * the real workspace via the file service, scoped to the first workspace folder,
+	 * and publish the answer back as an `fs.result` carrying the same `requestId`.
+	 */
+	private async _handleFsCommand(key: string, kind: RelayFsKind, requestId: string, path: string, content: string | undefined): Promise<void> {
+		const client = this._clients.get(key);
+		if (!client) {
+			return;
+		}
+		try {
+			const root = this._workspaceService.getWorkspace().folders[0]?.uri;
+			if (!root) {
+				throw new Error('no workspace open');
+			}
+			const target = this._resolveInWorkspace(root, path);
+			if (!target) {
+				throw new Error('bad path');
+			}
+			if (kind === 'fs.list') {
+				const stat = await this._fileService.resolve(target);
+				const entries = (stat.children ?? [])
+					.filter(child => child.name !== '.git')
+					.map(child => ({ name: child.name, type: child.isDirectory ? 'dir' : 'file', size: child.size }))
+					.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
+				client.publish({ kind: 'fs.result', requestId, ok: true, entries });
+			} else if (kind === 'fs.read') {
+				const file = await this._fileService.readFile(target);
+				const bytes = file.value.buffer;
+				if (bytes.includes(0)) {
+					client.publish({ kind: 'fs.result', requestId, ok: false, error: 'binary file' });
+					return;
+				}
+				const truncated = bytes.length > CeliadorRelayBridge.MAX_FILE_BYTES;
+				const slice = truncated ? bytes.subarray(0, CeliadorRelayBridge.MAX_FILE_BYTES) : bytes;
+				client.publish({ kind: 'fs.result', requestId, ok: true, content: new TextDecoder().decode(slice), encoding: 'utf8', truncated });
+			} else {
+				await this._fileService.writeFile(target, VSBuffer.fromString(content ?? ''));
+				client.publish({ kind: 'fs.result', requestId, ok: true });
+			}
+		} catch (err) {
+			client.publish({ kind: 'fs.result', requestId, ok: false, error: err instanceof Error ? err.message : String(err) });
+		}
+	}
+
+	/** Resolve a workspace-relative path under `root`, rejecting any `..` escape. */
+	private _resolveInWorkspace(root: URI, rel: string): URI | undefined {
+		const segments = (rel ?? '').split('/').filter(segment => segment.length > 0 && segment !== '.');
+		if (segments.some(segment => segment === '..')) {
+			return undefined;
+		}
+		const target = segments.length ? joinPath(root, ...segments) : root;
+		return isEqualOrParent(target, root) ? target : undefined;
 	}
 
 	/** Publish a status change; only once the relay session is live, and only on change. */
