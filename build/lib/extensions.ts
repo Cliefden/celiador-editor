@@ -323,6 +323,9 @@ const excludedExtensions = [
 	'vscode-test-resolver',
 	'ms-vscode.node-debug',
 	'ms-vscode.node-debug2',
+	// Celiador: port forwarding runs through the `code-tunnel` CLI and Microsoft dev
+	// tunnels; Celiador ships neither, so the extension could only fail.
+	'tunnel-forwarding',
 ];
 
 const marketplaceWebExtensionsExclude = new Set([

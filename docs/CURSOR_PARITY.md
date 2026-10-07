@@ -34,11 +34,17 @@ app**, not just the dev build; each phase ships independently.
   → "Sign in to Celiador", model-picker update hints); no post-update fetch from
   code.visualstudio.com; no "Ask @vscode". Already off: Settings Sync, telemetry,
   experiments. Kept by decision: the bundled GitHub Pull Requests extension.
-- **Remaining:** `defaultChatAgent` in product.json still points at Copilot endpoints
-  (called once any GitHub session exists); the `github` and `tunnel-forwarding`
-  built-ins; Copilot plan actions in the Command Palette; ~25 lower-visibility
-  "VS Code" strings (reload/restart prompts, MCP welcome, issue reporter, settings
-  descriptions); a Celiador `documentationUrl`.
+- **Done, second batch:** blanked the Copilot network endpoints in `defaultChatAgent`
+  (every caller skips an empty URL); dropped the `tunnel-forwarding` built-in (no tunnel
+  CLI is shipped, so it could only fail); Copilot setup/plan/settings commands hidden
+  from the Command Palette; ~20 hard-coded "VS Code" strings now use the product name
+  (reload/restart prompts, extension install errors, MCP welcome, issue reporter, tool
+  sets, external terminal title, locale action, `/vscode-pet`); Beginner walkthrough no
+  longer links to Settings Sync or aka.ms. Kept by decision: the `github` built-in
+  (Publish to GitHub, git auth).
+- **Remaining:** a Celiador `documentationUrl` (needs a docs page on celiador.ai —
+  `/docs` is 404); settings descriptions that mention Copilot/Microsoft (bulk sweep);
+  the Workspace Trust walkthrough step still links to code.visualstudio.com docs.
 
 ## Phase 2 — Inline edit (Cmd-K) + inline diff review
 - Audit what `vs/sessions`/agentHost already exposes for inline edit; wire a keybinding

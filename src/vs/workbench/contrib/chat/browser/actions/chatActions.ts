@@ -1178,7 +1178,7 @@ export function registerChatActions() {
 				id: 'workbench.action.chat.manageSettings',
 				title: localize2('manageChat', "Manage Copilot Settings"),
 				category: CHAT_CATEGORY,
-				f1: true,
+				f1: product.nameShort === 'Code - OSS', // Celiador: no Copilot settings.
 				precondition: ContextKeyExpr.and(
 					ContextKeyExpr.or(
 						ChatContextKeys.Entitlement.planFree,
@@ -1211,7 +1211,7 @@ export function registerChatActions() {
 			super({
 				id: 'workbench.action.chat.showExtensionsUsingCopilot',
 				title: localize2('showCopilotUsageExtensions', "Show Extensions using Copilot"),
-				f1: true,
+				f1: product.nameShort === 'Code - OSS', // Celiador: no Copilot.
 				category: EXTENSIONS_CATEGORY,
 				precondition: ChatContextKeys.enabled
 			});
