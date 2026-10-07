@@ -710,6 +710,33 @@ class TestCopilotClient implements ITestCopilotClient {
 
 const TEST_MCP_RESOURCE = 'https://mcp.example.com';
 const TEST_MCP_SCOPES = ['read'] as const;
+/** Celiador: the `@github/copilot` CLI is not installed in this fork; the test client never spawns it. */
+const FAKE_COPILOT_CLI_PATH = '/test/node_modules/@github/copilot/index.js';
+
+/**
+ * Celiador: whether the real `@github/copilot` CLI is installed. This fork does not
+ * install it (proprietary; see the "drop proprietary deps" change), so tests that
+ * start the real CopilotAgent client run only where it is present.
+ */
+async function isCopilotCliInstalled(): Promise<boolean> {
+	for (const pkg of [`copilot-${process.platform}-${process.arch}`, 'copilot']) {
+		try {
+			await fs.access(URI.joinPath(URI.file(process.cwd()), 'node_modules', '@github', pkg, 'index.js').fsPath);
+			return true;
+		} catch {
+			// not installed under this name
+		}
+	}
+	return false;
+}
+function testWithCopilotCli(title: string, fn: () => Promise<void>): ReturnType<typeof test> {
+	return test(title, async function () {
+		if (!await isCopilotCliInstalled()) {
+			this.skip();
+		}
+		return fn();
+	});
+}
 type TestMcpAuthConfig = Pick<Parameters<ITestCopilotClient['createSession']>[0], 'onMcpAuthRequest'>;
 type TestMcpAuthHandler = NonNullable<TestMcpAuthConfig['onMcpAuthRequest']>;
 type TestMcpAuthResult = Awaited<ReturnType<TestMcpAuthHandler>>;
@@ -1020,6 +1047,10 @@ class ResumePathCopilotAgent extends CopilotAgent {
 	protected override _createCopilotClient(): CopilotClient {
 		return this._copilotClient as CopilotClient;
 	}
+
+	protected override async _resolveCopilotCliPath(): Promise<string> {
+		return FAKE_COPILOT_CLI_PATH;
+	}
 }
 
 class TestableCopilotAgent extends CopilotAgent {
@@ -1064,6 +1095,10 @@ class TestableCopilotAgent extends CopilotAgent {
 		this.createdClientOptions.push(options);
 		this.lastClientOptions = options;
 		return this._copilotClient as CopilotClient;
+	}
+
+	protected override async _resolveCopilotCliPath(): Promise<string> {
+		return FAKE_COPILOT_CLI_PATH;
 	}
 
 	registerFakeSession(sessionId: string, fake: IFakeAgentSession): void {
@@ -4045,7 +4080,7 @@ suite('CopilotAgent', () => {
 		}
 	});
 
-	test('createChat infers workspace-less from an omitted workingDirectory and uses a stable scratch dir', async () => {
+	testWithCopilotCli('createChat infers workspace-less from an omitted workingDirectory and uses a stable scratch dir', async () => {
 		const userHome = URI.file(await fs.mkdtemp(`${os.tmpdir()}/qc-home-`));
 		const agent = createTestAgent(disposables, { userHome });
 		try {
@@ -4072,7 +4107,7 @@ suite('CopilotAgent', () => {
 	}).timeout(30_000);
 
 	suite('quick chat scratch directory', () => {
-		test('does not discover workspace customizations from scratch', async () => {
+		testWithCopilotCli('does not discover workspace customizations from scratch', async () => {
 			const userHome = URI.file(await fs.mkdtemp(`${os.tmpdir()}/qc-home-`));
 			const agent = createTestAgent(disposables, { userHome });
 			try {
@@ -4124,7 +4159,7 @@ suite('CopilotAgent', () => {
 			}
 		}).timeout(30_000);
 
-		test('session teardown cleans up the quick chat scratch dir', async () => {
+		testWithCopilotCli('session teardown cleans up the quick chat scratch dir', async () => {
 			const userHome = URI.file(await fs.mkdtemp(`${os.tmpdir()}/qc-home-`));
 			const agent = createTestAgent(disposables, { userHome });
 			try {
@@ -9016,7 +9051,7 @@ suite('CopilotAgent', () => {
 			}
 		});
 
-		test('provisional session anchors customization discovery to the additional roots (gated)', async () => {
+		testWithCopilotCli('provisional session anchors customization discovery to the additional roots (gated)', async () => {
 			const { agent, stateManager } = createTestAgentContext(disposables);
 			try {
 				await agent.authenticate('https://api.github.com', 'token');

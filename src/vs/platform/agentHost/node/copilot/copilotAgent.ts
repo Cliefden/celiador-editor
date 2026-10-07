@@ -1353,6 +1353,15 @@ export class CopilotAgent extends Disposable implements IAgent {
 		return new (copilotSdk().CopilotClient)(options);
 	}
 
+	/**
+	 * Resolves the Copilot CLI entry point. Celiador: protected so tests that
+	 * override {@link _createCopilotClient} can also supply a path — the
+	 * `@github/copilot` package is not shipped (or installed) in this fork.
+	 */
+	protected _resolveCopilotCliPath(nodeModulesUri: URI): Promise<string> {
+		return resolveCopilotCliPath(nodeModulesUri);
+	}
+
 	// ---- auth ---------------------------------------------------------------
 
 	getDescriptor(): IAgentDescriptor {
@@ -1406,7 +1415,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 		let stage = 'resolving the Copilot CLI path';
 		const diagnostics = (async () => {
 			const nodeModulesUri = getAppNodeModulesUri();
-			const cliPath = await resolveCopilotCliPath(nodeModulesUri);
+			const cliPath = await this._resolveCopilotCliPath(nodeModulesUri);
 			const runtimeSdkPath = join(dirname(cliPath), 'sdk', 'index.js');
 			stage = 'checking the Copilot runtime SDK';
 			if (!await fileExists(runtimeSdkPath)) {
@@ -2350,7 +2359,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 			// We can't use require.resolve() because @github/copilot's exports map
 			// blocks direct subpath access.
 			const nodeModulesUri = getAppNodeModulesUri();
-			const cliPath = await resolveCopilotCliPath(nodeModulesUri);
+			const cliPath = await this._resolveCopilotCliPath(nodeModulesUri);
 
 			// The SDK's sandbox auto-detection looks for `<MXC_BIN_DIR>/<arch>/wxc-exec.exe`
 			// (and the Linux/macOS equivalents). VS Code core ships the MXC sandbox binaries
