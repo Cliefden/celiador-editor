@@ -65,8 +65,10 @@ app**, not just the dev build; each phase ships independently.
   "Press ⌘I to ask the Celiador agent for a command".
 - **Decided:** inline edit stays on ⌘I; no Cursor-style ⌘K (it would displace VS Code's
   ⌘K chords).
-- **Next:** multi-file edits from inline open in a side group (upstream behaviour,
-  unverified with Claude).
+- **Verified, multi-file:** an inline request that touches another file asks before the
+  out-of-scope write ("Edit file? … Allow in this Session / Skip"), then opens that file
+  beside the editor with its own Keep/Undo hunks (`screenshots/phase2-inline-multifile.png`).
+- **Phase 2 done.**
 
 ## Phase 3 — Codebase context (moat #1)
 - `@`-mentions: files, symbols, folders, git, docs, web.
