@@ -105,6 +105,9 @@ export interface IProductConfiguration {
 	readonly nameShort: string;
 	readonly nameLong: string;
 
+	/** Celiador: base URL of the daemon (agent gateway, relay, APNs). See `celiador-ai`'s productConfig. */
+	readonly celiadorDaemonUrl?: string;
+
 	readonly win32AppUserModelId?: string;
 	readonly win32MutexName?: string;
 	readonly win32SetupMutexName?: string;

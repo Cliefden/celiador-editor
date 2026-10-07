@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { getRestrictedSetting } from "./config";
+import { resolveDaemonUrl } from "./productConfig";
 
 // Dependency-free Supabase/GoTrue client for the editor. Supports PKCE-protected
 // OAuth and magic-link flows. Session stored in VS Code SecretStorage, access token
@@ -44,7 +45,7 @@ export class Auth {
   constructor(private readonly secrets: vscode.SecretStorage) {}
 
   private daemonUrl(): string {
-    return getRestrictedSetting<string>("daemonUrl", "https://celiador.ai").replace(/\/+$/, "");
+    return resolveDaemonUrl();
   }
 
   /** Resolve the Supabase base URL + anon key (setting override → /api/config). */

@@ -93,6 +93,16 @@ export class ChatSetupController extends Disposable {
 	}
 
 	async setup(options: IChatSetupControllerOptions = {}): Promise<ChatSetupResultValue> {
+		// Celiador: disable the GitHub Copilot chat onboarding (sign-in + extension
+		// install). The agent is the native agentHost Claude provider, routed through
+		// the Celiador daemon and authenticated via the `celiador` auth provider, so
+		// every chat-setup trigger becomes a safe no-op here — which is what prevents
+		// the "An error occurred while setting up chat" dialog from ever firing.
+		// Upstream (Code - OSS) behaviour is preserved below for clean rebases.
+		if (this.productService.nameShort !== 'Code - OSS') {
+			return undefined;
+		}
+
 		const watch = new StopWatch(false);
 		const title = localize('setupChatProgress', "Getting chat ready...");
 		const badge = this.activityService.showViewContainerActivity(ChatViewContainerId, {

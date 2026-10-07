@@ -1,7 +1,7 @@
 {
   "name": "celiador-defaults",
   "displayName": "Celiador Defaults",
-  "description": "Ships Celiador's default settings — hides the built-in AI/chat surfaces so only the Celiador AI extension provides an LLM.",
+  "description": "Ships Celiador's default settings — enables the native agent (daemon-routed) for chat and inline edit. (Telemetry needs no default: product.json configures no telemetry, so it is always off. Application-scoped settings such as update.mode cannot be defaulted from an extension.)",
   "version": "1.0.0",
   "publisher": "celiador",
   "license": "MIT",
@@ -10,9 +10,10 @@
   },
   "contributes": {
     "configurationDefaults": {
-      "chat.disableAIFeatures": true,
-      "chat.agentHost.claudeAgent.enabled": false,
-      "chat.agentHost.codexAgent.enabled": false
+      "chat.disableAIFeatures": false,
+      "chat.agentHost.claudeAgent.enabled": true,
+      "chat.agentHost.codexAgent.enabled": false,
+      "chat.inlineChat.agentHost.enabled": true
     }
   },
   "repository": {

@@ -17,6 +17,7 @@ import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../..
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { ChatMicrosoftAuthenticationEnabledSettingId } from '../../../../../platform/chat/common/chatSettings.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { localize } from '../../../../../nls.js';
@@ -294,6 +295,7 @@ export class ChatSetup {
 		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IProductService private readonly productService: IProductService,
 	) { }
 
 	skipDialog(): void {
@@ -301,6 +303,13 @@ export class ChatSetup {
 	}
 
 	async run(options?: IChatSetupRunOptions): Promise<IChatSetupResult> {
+		// Celiador: never run the GitHub Copilot setup/sign-in flow — no workspace-trust
+		// AI prompt, no "Sign in to use GitHub Copilot" dialog, no extension install. The
+		// agent is the native agentHost Claude provider (daemon-routed), authenticated via
+		// the `celiador` auth provider. No-op here; upstream behaviour preserved below.
+		if (this.productService.nameShort !== 'Code - OSS') {
+			return { dialogSkipped: true, success: undefined };
+		}
 		if (this.pendingRun) {
 			return this.pendingRun;
 		}

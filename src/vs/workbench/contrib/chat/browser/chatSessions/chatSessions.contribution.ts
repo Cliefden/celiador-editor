@@ -1670,7 +1670,7 @@ function registerNewSessionInPlaceAction(type: string, displayName: string): IDi
 			});
 		}
 
-		// Expected args: [chatSessionPosition: 'sidebar' | 'editor']
+		// Expected args: [chatSessionPosition: 'sidebar' | 'editor', chatSendOptions?: NewChatSessionSendOptions]
 		async run(accessor: ServicesAccessor, ...args: unknown[]): Promise<void> {
 			if (args.length === 0) {
 				throw new BugIndicatingError('Expected chat session position argument');
@@ -1681,12 +1681,17 @@ function registerNewSessionInPlaceAction(type: string, displayName: string): IDi
 				throw new BugIndicatingError(`Invalid chat session position argument: ${chatSessionPosition}`);
 			}
 
+			// Celiador: an optional prompt to send into the new session. Programmatic
+			// contributions (the local agent host's `agent-host-*` types) only get this
+			// in-place action, so it is the way to hand a request to such a session.
+			const sendOptions = isNewChatSessionSendOptions(args[1]) ? args[1] : undefined;
+
 			// Resolve the editor to replace up front from the currently active
 			// chat editor, so the replacement targets that specific tab rather
 			// than whatever becomes active during the async open.
 			const activeEditor = accessor.get(IEditorGroupsService).activeGroup.activeEditor;
 			const replaceEditorForResource = activeEditor instanceof ChatEditorInput ? activeEditor.sessionResource : undefined;
-			await openChatSession(accessor, { type: type, displayName: localize('chat', "Chat"), position: chatSessionPosition, replaceEditorForResource });
+			await openChatSession(accessor, { type: type, displayName: localize('chat', "Chat"), position: chatSessionPosition, replaceEditorForResource }, sendOptions);
 		}
 	});
 }
@@ -1731,6 +1736,11 @@ type NewChatSessionSendOptions = {
 	 */
 	readonly importConversation?: IAgentHostImportConversation;
 };
+
+/** Celiador: guard for the optional send options passed to the in-place action. */
+function isNewChatSessionSendOptions(value: unknown): value is NewChatSessionSendOptions {
+	return typeof value === 'object' && value !== null && typeof (value as { prompt?: unknown }).prompt === 'string';
+}
 
 export type NewChatSessionOpenOptions = {
 	readonly type: string;

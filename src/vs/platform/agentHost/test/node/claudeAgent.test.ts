@@ -1361,6 +1361,13 @@ suite('ClaudeAgent', () => {
 			authorization_servers: ['https://github.com/login/oauth'],
 			scopes_supported: ['repo'],
 			required: false,
+		}, {
+			// Celiador: the daemon gateway resource, always advertised and optional.
+			resource: 'https://celiador.ai/api/anthropic',
+			resource_name: 'Celiador',
+			authorization_servers: ['https://celiador.ai'],
+			scopes_supported: [],
+			required: false,
 		}]);
 	});
 
@@ -1377,6 +1384,7 @@ suite('ClaudeAgent', () => {
 			resources: [
 				{ resource: 'https://ghe.acme.com/api/v3', servers: ['https://ghe.acme.com/login/oauth'] },
 				{ resource: 'https://ghe.acme.com/api/v3/repos', servers: ['https://ghe.acme.com/login/oauth'] },
+				{ resource: 'https://celiador.ai/api/anthropic', servers: ['https://celiador.ai'] },
 			],
 			acceptsEnterpriseCopilot: true,
 			rejectsDotCom: false,
@@ -1445,6 +1453,7 @@ suite('ClaudeAgent', () => {
 				resources: [
 					{ resource: 'https://api.github.com', required: false },
 					{ resource: 'https://api.github.com/repos', required: false },
+					{ resource: 'https://celiador.ai/api/anthropic', required: false },
 				],
 				proxyStarts: 0,
 			},
@@ -1452,6 +1461,7 @@ suite('ClaudeAgent', () => {
 				resources: [
 					{ resource: 'https://api.github.com', required: false },
 					{ resource: 'https://api.github.com/repos', required: false },
+					{ resource: 'https://celiador.ai/api/anthropic', required: false },
 				],
 				proxyStarts: 1,
 			},
@@ -2216,6 +2226,43 @@ suite('ClaudeAgent', () => {
 		tokAModels.complete([CLAUDE_OPUS]);
 		await tick();
 		assert.deepStrictEqual(agent.models.get().map(m => m.id), [toClaudeModelSelectionId(CLAUDE_PROVIDER_COPILOT, CLAUDE_SONNET.id)]);
+	});
+
+	test('Celiador: a merged refresh in flight when the daemon token arrives does not blank the daemon catalog', async () => {
+		// A GitHub sign-in starts a merged refresh that hangs; the Celiador daemon
+		// token then publishes the daemon model. The late merged write must be dropped.
+		const proxy = new FakeClaudeProxyService();
+		const api = new FakeCopilotApiService();
+		const ghModels = new DeferredPromise<CCAModel[]>();
+		api.models = () => ghModels.p;
+
+		const services = new ServiceCollection(
+			[ILogService, new NullLogService()],
+			...createTestAgentStateServices(disposables),
+			[ICopilotApiService, api],
+			[IClaudeProxyService, proxy],
+			[ISessionDataService, createNullSessionDataService()],
+			[IClaudeAgentSdkService, new FakeClaudeAgentSdkService()],
+			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
+			[IAgentPluginManager, new FakeAgentPluginManager()],
+			[IProductService, FakeProductService],
+			[IAgentHostGitHubEndpointService, createTestGitHubEndpointService()],
+		);
+		const instantiationService: IInstantiationService = disposables.add(new InstantiationService(services));
+		const agent = disposables.add(instantiationService.createInstance(ClaudeAgent));
+
+		await agent.authenticate('https://api.github.com', 'gh-token');
+		await agent.authenticate('https://celiador.ai/api/anthropic', 'supabase-token');
+		await tick();
+		const afterDaemon = agent.models.get().map(m => m.name);
+
+		ghModels.complete([]); // an empty merged catalog, as when the proxy fetch yields nothing
+		await tick();
+
+		assert.deepStrictEqual({ afterDaemon, afterMerged: agent.models.get().map(m => m.name) }, {
+			afterDaemon: ['Claude (Celiador)'],
+			afterMerged: ['Claude (Celiador)'],
+		});
 	});
 
 	// #region Phase 5 — session lifecycle
@@ -6630,6 +6677,7 @@ suite('ClaudeAgent — per-session provider', () => {
 		assert.deepStrictEqual(optional.map(r => ({ resource: r.resource, required: r.required })), [
 			{ resource: 'https://api.github.com', required: false },
 			{ resource: 'https://api.github.com/repos', required: false },
+			{ resource: 'https://celiador.ai/api/anthropic', required: false },
 		]);
 	});
 

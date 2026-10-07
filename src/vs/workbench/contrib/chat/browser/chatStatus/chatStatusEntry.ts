@@ -13,6 +13,7 @@ import { CancellationToken, CancellationTokenSource } from '../../../../../base/
 import { disposableLongTimeout, disposableTimeout } from '../../../../../base/common/async.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { getCodeEditor } from '../../../../../editor/browser/editorBrowser.js';
@@ -132,6 +133,7 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 		@IInlineCompletionsService private readonly completionsService: IInlineCompletionsService,
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 		@IStorageService private readonly storageService: IStorageService,
+		@IProductService private readonly productService: IProductService,
 	) {
 		super();
 
@@ -167,7 +169,10 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 
 	private update(): void {
 		const sentiment = this.chatEntitlementService.sentiment;
-		if (!sentiment.hidden) {
+		// Celiador: never show the GitHub Copilot status-bar item — the agent is the
+		// native agentHost Claude provider (daemon-routed). Upstream (Code - OSS) keeps it.
+		const hidden = sentiment.hidden || this.productService.nameShort !== 'Code - OSS';
+		if (!hidden) {
 			const props = this.getEntryProps();
 			if (this.entry) {
 				this.entry.update(props);

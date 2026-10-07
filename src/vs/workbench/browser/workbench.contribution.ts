@@ -956,7 +956,9 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
 					localize('window.openFoldersInNewWindow.off', "Folders will replace the last active window."),
 					localize('window.openFoldersInNewWindow.default', "Folders will open in a new window unless a folder is picked from within the application (e.g. via the File menu).")
 				],
-				'default': 'default',
+				// --- Start Celiador: open folders in a new window by default (better UX than hijacking the current window from File > Open) ---
+				'default': 'on',
+				// --- End Celiador ---
 				'scope': ConfigurationScope.APPLICATION,
 				'markdownDescription': localize('openFoldersInNewWindow', "Controls whether folders should open in a new window or replace the last active window.\nNote that there can still be cases where this setting is ignored (e.g. when using the `--new-window` or `--reuse-window` command line option).")
 			},

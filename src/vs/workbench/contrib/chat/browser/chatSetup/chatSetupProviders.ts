@@ -56,6 +56,9 @@ import { IDefaultAccountService } from '../../../../../platform/defaultAccount/c
 import { IHostService } from '../../../../services/host/browser/host.js';
 import { IOutputService } from '../../../../services/output/common/output.js';
 import { IExtensionsWorkbenchService } from '../../../extensions/common/extensions.js';
+import { IAuthenticationService } from '../../../../services/authentication/common/authentication.js';
+import { IProductService } from '../../../../../platform/product/common/productService.js';
+import { SessionType } from '../../common/chatSessionsService.js';
 
 const defaultChat = {
 	extensionId: product.defaultChatAgent?.extensionId ?? '',
@@ -158,7 +161,7 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 			slashCommands: [],
 			disambiguation: [],
 			locations: [location],
-			metadata: { helpTextPrefix: SetupAgent.SETUP_NEEDED_MESSAGE },
+			metadata: { helpTextPrefix: product.nameShort !== 'Code - OSS' ? SetupAgent.CELIADOR_SIGN_IN_MESSAGE : SetupAgent.SETUP_NEEDED_MESSAGE },
 			description,
 			extensionId: nullExtensionDescription.identifier,
 			extensionVersion: undefined,
@@ -177,6 +180,16 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 
 	private static readonly SETUP_NEEDED_MESSAGE = new MarkdownString(localize('settingUpCopilotNeeded', "You need to set up GitHub Copilot and be signed in to use Chat."));
 	private static readonly TRUST_NEEDED_MESSAGE = new MarkdownString(localize('trustNeeded', "You need to trust this workspace to use Chat."));
+
+	// Celiador: the agent is the native agentHost Claude provider (a separate
+	// `agent-host-claude` chat session type), authenticated via the `celiador` auth
+	// provider. These replace the GitHub Copilot setup flow for the Local chat.
+	private static readonly CELIADOR_SIGN_IN_MESSAGE = new MarkdownString(localize('celiadorSignInNeeded', "Sign in to Celiador to use Chat."));
+	private static readonly CELIADOR_AGENT_STARTING_MESSAGE = new MarkdownString(localize('celiadorAgentStarting', "The Celiador agent is still starting. Try again in a moment."));
+	private static readonly CELIADOR_AUTH_PROVIDER_ID = 'celiador';
+	private static readonly CELIADOR_SIGN_IN_COMMAND_ID = 'celiador.signIn';
+	// The agent host registers its session types programmatically, which only get the in-place action.
+	private static readonly CELIADOR_OPEN_SESSION_COMMAND_ID = `workbench.action.chat.openNewChatSessionInPlace.${SessionType.AgentHostClaude}`;
 
 	private static readonly CHAT_RETRY_COMMAND_ID = 'workbench.action.chat.retrySetup';
 	private static readonly CHAT_SHOW_OUTPUT_COMMAND_ID = 'workbench.action.chat.showOutput';
@@ -201,6 +214,8 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 		@IOutputService private readonly outputService: IOutputService,
 		@IExtensionsWorkbenchService private readonly extensionsWorkbenchService: IExtensionsWorkbenchService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IAuthenticationService private readonly authenticationService: IAuthenticationService,
+		@IProductService private readonly productService: IProductService,
 	) {
 		super();
 
@@ -256,6 +271,12 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 	}
 
 	private async doInvoke(request: IChatAgentRequest, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatWidgetService: IChatWidgetService, chatAgentService: IChatAgentService, languageModelToolsService: ILanguageModelToolsService, defaultAccountService: IDefaultAccountService): Promise<IChatAgentResult> {
+		// Celiador: never run the GitHub Copilot setup flow (it is a no-op here and
+		// would answer with "set up GitHub Copilot"); hand off to the Celiador agent.
+		if (this.productService.nameShort !== 'Code - OSS') {
+			return this.doInvokeCeliador(request, progress);
+		}
+
 		if (chatRequiresSetup({
 			completed: !!this.context.state.completed,
 			disabled: !!this.context.state.disabled,
@@ -268,6 +289,47 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 		}
 
 		return this.doInvokeWithoutSetup(request, progress, chatService, languageModelsService, chatWidgetService, chatAgentService, languageModelToolsService);
+	}
+
+	/**
+	 * Celiador: route a Local-chat request to the Celiador agent. Signed out, offer
+	 * Celiador sign-in; signed in, re-send the request into a new `agent-host-claude`
+	 * session (started without awaiting, since that command resolves only once the
+	 * agent has finished responding).
+	 */
+	private async doInvokeCeliador(request: IChatAgentRequest, progress: (part: IChatProgress) => void): Promise<IChatAgentResult> {
+		if (!await this.isSignedInToCeliador()) {
+			progress({ kind: 'markdownContent', content: SetupAgent.CELIADOR_SIGN_IN_MESSAGE });
+			progress({
+				kind: 'command',
+				command: {
+					id: SetupAgent.CELIADOR_SIGN_IN_COMMAND_ID,
+					title: localize('celiadorSignIn', "Sign In to Celiador")
+				}
+			});
+			return {};
+		}
+
+		if (!CommandsRegistry.getCommand(SetupAgent.CELIADOR_OPEN_SESSION_COMMAND_ID)) {
+			progress({ kind: 'markdownContent', content: SetupAgent.CELIADOR_AGENT_STARTING_MESSAGE });
+			return {};
+		}
+
+		this.commandService.executeCommand(SetupAgent.CELIADOR_OPEN_SESSION_COMMAND_ID, 'sidebar', {
+			prompt: request.message,
+			attachedContext: request.variables.variables
+		}).catch(error => this.logService.error(`[chat setup] Failed to hand off to the Celiador agent: ${toErrorMessage(error)}`));
+
+		return {};
+	}
+
+	private async isSignedInToCeliador(): Promise<boolean> {
+		try {
+			const sessions = await this.authenticationService.getSessions(SetupAgent.CELIADOR_AUTH_PROVIDER_ID, []);
+			return sessions.length > 0;
+		} catch {
+			return false; // provider not registered yet
+		}
 	}
 
 	private async doInvokeWithoutSetup(request: IChatAgentRequest, progress: (part: IChatProgress) => void, chatService: IChatService, languageModelsService: ILanguageModelsService, chatWidgetService: IChatWidgetService, chatAgentService: IChatAgentService, languageModelToolsService: ILanguageModelToolsService): Promise<IChatAgentResult> {

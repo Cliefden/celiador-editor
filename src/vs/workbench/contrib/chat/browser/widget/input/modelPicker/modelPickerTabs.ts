@@ -114,6 +114,7 @@ export function buildModelPickerDestinations(
 	models: readonly ILanguageModelChatMetadataAndIdentifier[],
 	languageModelsService: ILanguageModelsService,
 	placeholders: readonly IModelPickerProviderPlaceholder[] = [],
+	hideBuiltInProvider: boolean = false, // Celiador: drop the GitHub Copilot tab — the daemon (agentHost) model is the only provider
 ): IModelPickerDestination[] {
 	const builtInModels: ILanguageModelChatMetadataAndIdentifier[] = [];
 	const userModels: ILanguageModelChatMetadataAndIdentifier[] = [];
@@ -135,7 +136,7 @@ export function buildModelPickerDestinations(
 	// the upgrade that would unlock them.
 	const hasAutoModel = models.some(isAutoModel);
 	const destinations: IModelPickerDestination[] = [];
-	if (builtInModels.length || builtInPlaceholders.length || hasAutoModel) {
+	if (!hideBuiltInProvider && (builtInModels.length || builtInPlaceholders.length || hasAutoModel)) {
 		destinations.push({
 			id: MODEL_PICKER_BUILT_IN_DESTINATION,
 			label: builtInLabel,

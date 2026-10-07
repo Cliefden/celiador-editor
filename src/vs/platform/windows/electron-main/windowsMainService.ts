@@ -1362,7 +1362,9 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 
 		// let the user settings override how folders are open in a new window or same window unless we are forced
 		const windowConfig = this.configurationService.getValue<IWindowSettings | undefined>('window');
-		const openFolderInNewWindowConfig = windowConfig?.openFoldersInNewWindow || 'default' /* default */;
+		// --- Start Celiador: default to opening folders in a NEW window (main process doesn't see the renderer schema default) ---
+		const openFolderInNewWindowConfig = windowConfig?.openFoldersInNewWindow || 'on' /* Celiador default (upstream: 'default') */;
+		// --- End Celiador ---
 		const openFilesInNewWindowConfig = windowConfig?.openFilesInNewWindow || 'off' /* default */;
 
 		let openFolderInNewWindow = (openConfig.preferNewWindow || openConfig.forceNewWindow) && !openConfig.forceReuseWindow;

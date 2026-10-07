@@ -2,6 +2,13 @@
 	"nameShort": "Celiador",
 	"nameLong": "Celiador",
 	"applicationName": "celiador",
+	"celiadorDaemonUrl": "https://celiador.ai",
+	"agentSdks": {
+		"claude": {
+			"version": "0.3.258",
+			"urlTemplate": "https://celiador.ai/sdk/claude/0.3.258/{sdkTarget}.tgz"
+		}
+	},
 	"dataFolderName": ".celiador",
 	"sharedDataFolderName": ".celiador-shared",
 	"win32MutexName": "celiador",
@@ -47,6 +54,23 @@
 	"agentsTelemetryAppName": "",
 	"webviewContentExternalBaseUrlTemplate": "https://{{uuid}}.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/",
 	"builtInExtensions": [
+		{
+			"name": "GitHub.vscode-pull-request-github",
+			"version": "0.166.1",
+			"sha256": "898a1f264e5d49067815df5ba04f6340addeb89e55c949a2995c3181d8c05249",
+			"vsix": "build/builtin-vsix/GitHub.vscode-pull-request-github-0.166.1.vsix",
+			"repo": "https://github.com/microsoft/vscode-pull-request-github",
+			"metadata": {
+				"id": "69ddd764-339a-4ecc-97c1-9c4ece58e36d",
+				"publisherId": {
+					"publisherId": "7c1c19cd-78eb-4dfb-8999-99caf7679002",
+					"publisherName": "GitHub",
+					"displayName": "GitHub",
+					"flags": "verified"
+				},
+				"publisherDisplayName": "GitHub"
+			}
+		},
 		{
 			"name": "ms-vscode.js-debug-companion",
 			"version": "1.1.3",
