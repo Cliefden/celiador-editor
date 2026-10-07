@@ -4,9 +4,14 @@ The editor ships in three channels that point at the matching daemon environment
 (see `daemon/ENVIRONMENTS.md`). Each channel is a distinct app identity so all
 three install side-by-side without clobbering each other's profile/keychain.
 
-The `celiador-ai` extension resolves the daemon URL as: `celiador.daemonUrl`
-setting (user override) → `celiadorDaemonUrl` in `product.json` (build default)
-→ `https://celiador.ai`. So a channel is defined purely by its `product.json`.
+A channel is defined purely by its `product.json`. The `celiadorDaemonUrl` field
+is read in three places, so one value switches the whole client:
+- the `celiador-ai` extension (`resolveDaemonUrl()` — `celiador.daemonUrl` setting
+  overrides it per user without a rebuild),
+- the native agent host (`src/vs/platform/agentHost/node/claude/claudeAgent.ts`),
+- the agent-session relay bridge
+  (`src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/celiadorRelayBridge.ts`).
+All three fall back to `https://celiador.ai` when the field is unset.
 
 | Channel | `nameShort`/`nameLong` | `applicationName` | `dataFolderName` | `darwinBundleIdentifier` | `urlProtocol` | `celiadorDaemonUrl` |
 |---|---|---|---|---|---|---|
