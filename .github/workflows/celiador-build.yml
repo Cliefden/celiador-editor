@@ -164,6 +164,9 @@ jobs:
           name: celiador-linux-${{ matrix.arch }}
           path: .build/out/*
           if-no-files-found: error
+          # Packages are rebuilt on every push and kept durably by the draft release;
+          # a short retention keeps the account's artifact storage quota from filling up.
+          retention-days: 7
 
   windows:
     name: Windows (${{ matrix.arch }})
@@ -257,6 +260,9 @@ jobs:
           name: celiador-windows-${{ matrix.arch }}
           path: .build/out/*
           if-no-files-found: error
+          # Packages are rebuilt on every push and kept durably by the draft release;
+          # a short retention keeps the account's artifact storage quota from filling up.
+          retention-days: 7
 
   macos:
     name: macOS (${{ matrix.arch }})
@@ -360,6 +366,9 @@ jobs:
           name: celiador-macos-${{ matrix.arch }}
           path: .build/out/*
           if-no-files-found: error
+          # Packages are rebuilt on every push and kept durably by the draft release;
+          # a short retention keeps the account's artifact storage quota from filling up.
+          retention-days: 7
 
   release:
     name: Draft release

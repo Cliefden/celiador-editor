@@ -999,8 +999,12 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			// No SDK, so no evidence of an account — say so rather than retaining a stale `true`.
 			this._nativeAccountSetUp = false;
 		}
+		// Celiador: the Copilot proxy route needs `@vscode/copilot-api`, which this
+		// fork does not ship, and Celiador builds (those with a daemon URL) serve
+		// models through the daemon — so a GitHub token alone never means "proxy".
+		const proxyToken = this._productService.celiadorDaemonUrl ? undefined : tokenAtStart;
 		const [proxyOutcome, nativeOutcome] = await Promise.allSettled([
-			tokenAtStart ? this._fetchProxyModels(tokenAtStart) : Promise.resolve<readonly IAgentModelInfo[]>([]),
+			proxyToken ? this._fetchProxyModels(proxyToken) : Promise.resolve<readonly IAgentModelInfo[]>([]),
 			canAttemptNative ? this._fetchNativeModels() : Promise.resolve<readonly IAgentModelInfo[]>([]),
 		]);
 		// Stale-write guard: a newer refresh superseded this one while we were
@@ -1014,7 +1018,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		if (this._daemonToken) {
 			return;
 		}
-		const attempted = (tokenAtStart ? 1 : 0) + (canAttemptNative ? 1 : 0);
+		const attempted = (proxyToken ? 1 : 0) + (canAttemptNative ? 1 : 0);
 		const failed = (proxyOutcome.status === 'rejected' ? 1 : 0) + (nativeOutcome.status === 'rejected' ? 1 : 0);
 		if (attempted > 0 && failed === attempted) {
 			// Every source we attempted failed — keep the last known-good catalog

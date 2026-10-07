@@ -2265,6 +2265,36 @@ suite('ClaudeAgent', () => {
 		});
 	});
 
+	test('Celiador: a GitHub token alone never queries the Copilot proxy catalog', async () => {
+		// Celiador builds (a daemon URL in product.json) do not ship @vscode/copilot-api,
+		// so the proxy route must not be attempted just because a GitHub session exists.
+		const api = new FakeCopilotApiService();
+		let proxyCatalogRequests = 0;
+		api.models = async () => {
+			proxyCatalogRequests++;
+			return [CLAUDE_SONNET];
+		};
+		const services = new ServiceCollection(
+			[ILogService, new NullLogService()],
+			...createTestAgentStateServices(disposables),
+			[ICopilotApiService, api],
+			[IClaudeProxyService, new FakeClaudeProxyService()],
+			[ISessionDataService, createNullSessionDataService()],
+			[IClaudeAgentSdkService, new FakeClaudeAgentSdkService()],
+			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
+			[IAgentPluginManager, new FakeAgentPluginManager()],
+			[IProductService, { ...FakeProductService, celiadorDaemonUrl: 'https://celiador.ai' }],
+			[IAgentHostGitHubEndpointService, createTestGitHubEndpointService()],
+		);
+		const instantiationService: IInstantiationService = disposables.add(new InstantiationService(services));
+		const agent = disposables.add(instantiationService.createInstance(ClaudeAgent));
+
+		await agent.authenticate('https://api.github.com', 'gh-token');
+		await tick();
+
+		assert.deepStrictEqual({ proxyCatalogRequests, models: agent.models.get() }, { proxyCatalogRequests: 0, models: [] });
+	});
+
 	// #region Phase 5 — session lifecycle
 
 	test('createChat (non-fork) mints a claude:/<uuid> backing with provisional: true; no DB or SDK contact', async () => {
