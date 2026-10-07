@@ -143,6 +143,7 @@ import { ChatToolRiskAssessmentService, IChatToolRiskAssessmentService } from '.
 import { ClientToolSetsContribution } from './tools/clientToolSetsContribution.js';
 import { RenameToolContribution } from './tools/renameTool.js';
 import { UsagesToolContribution } from './tools/usagesTool.js';
+import { WorkspaceSymbolsToolContribution } from './tools/workspaceSymbolsTool.js'; // Celiador
 import './voiceClient/micCaptureService.js';
 import './voiceClient/ttsPlaybackService.js';
 import './voiceClient/voiceClientService.js';
@@ -3256,6 +3257,7 @@ registerWorkbenchContribution2(ChatStatusBarEntry.ID, ChatStatusBarEntry, Workbe
 registerWorkbenchContribution2(BuiltinToolsContribution.ID, BuiltinToolsContribution, WorkbenchPhase.Eventually);
 registerWorkbenchContribution2(ClientToolSetsContribution.ID, ClientToolSetsContribution, WorkbenchPhase.Eventually);
 registerWorkbenchContribution2(UsagesToolContribution.ID, UsagesToolContribution, WorkbenchPhase.BlockRestore);
+registerWorkbenchContribution2(WorkspaceSymbolsToolContribution.ID, WorkspaceSymbolsToolContribution, WorkbenchPhase.BlockRestore); // Celiador
 registerWorkbenchContribution2(RenameToolContribution.ID, RenameToolContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatAgentSettingContribution.ID, ChatAgentSettingContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(ChatForegroundSessionCountContribution.ID, ChatForegroundSessionCountContribution, WorkbenchPhase.AfterRestored);

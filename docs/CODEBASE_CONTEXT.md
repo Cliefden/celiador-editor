@@ -4,6 +4,25 @@ Status: **decided 2026-10-07 — option A first.** No index for now; revisit D i
 exploratory-search signal shows up. (Original open questions kept at the end.)
 Roadmap: `docs/CURSOR_PARITY.md` → Phase 3.
 
+## Phase 3a — shipped (option A)
+
+- **Workspace-symbol tool** (`contrib/chat/browser/tools/workspaceSymbolsTool.ts`,
+  `vscode_searchWorkspaceSymbols`, reference name `workspaceSymbols`): fuzzy symbol search
+  over the language servers' index, scoped to the workspace / working directory. Member of
+  the `vscode-general` tool set, so the Claude agent sees it as an `mcp__client__` tool.
+- **Project overview** (`platform/agentHost/node/chatContributions/projectOverview/`): on
+  the first turn of each Claude chat, adds the workspace root's top-level layout and, when
+  the repo has no `CLAUDE.md` (which the SDK already loads), its `AGENTS.md`.
+- **Instrumentation** (`node/claude/claudeExplorationTracker.ts`): every completed Claude
+  turn logs `exploration turnId=… beforeFirstEdit=N searches=M toolCalls=K edited=…` to
+  the agent host log. Many turns with a high `beforeFirstEdit` is the signal for 3b (D).
+- **Known issue (blocks relying on client tools):** in the packaged app, a Claude turn that
+  calls any workbench client tool (`workspaceSymbols`, and the pre-existing `usages`) runs
+  the tool but then stalls. One cause is fixed here (a completion that beat the SDK's MCP
+  handler was dropped; now buffered, `claudeAgentSession.completeClientToolCall`); a second
+  run showed the workbench's `ChatToolCallComplete` never reaching the host. Until that is
+  fixed the overview does not steer the agent toward the symbol tool.
+
 ## What works today (verified 2026-10-07, packaged app)
 
 - **Explicit context works.** The chat input attaches the current file automatically,

@@ -77,6 +77,9 @@ app**, not just the dev build; each phase ships independently.
 - **Design proposal:** `docs/CODEBASE_CONTEXT.md` (options A–D, recommendation, open
   decisions). Verified today: `#file:` / Add Context references reach the Claude agent,
   which also searches on its own with Grep/Glob/Read; no semantic index exists.
+- **Phase 3a (option A) done:** workspace-symbol tool for the agent, first-turn project
+  overview (root layout + `AGENTS.md` when there is no `CLAUDE.md`), and per-turn
+  explore-before-first-edit logging. Next: watch that signal before deciding on 3b (index).
 
 ## Phase 4 — Tab autocomplete (moat #2)
 - Model-backed multi-line / next-edit completion via a fast model through the daemon,
