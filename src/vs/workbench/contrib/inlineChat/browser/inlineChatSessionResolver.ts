@@ -56,11 +56,11 @@ export class InlineChatSessionResolver implements IInlineChatSessionResolver {
 		const meta = getInlineChatSessionMeta(languageId, targetUri);
 		let modelRef: IChatModelReference | undefined;
 		const agentHostEnabled = this._configurationService.getValue<boolean>(ChatConfiguration.InlineChatAgentHostEnabled) === true;
-		const contribution = agentHostEnabled ? this._chatSessionsService.getChatSessionContribution(SessionType.AgentHostCopilot) : undefined;
-		const didAttemptAgentHost = contribution?.locations?.includes(ChatAgentLocation.EditorInline) === true;
-		if (didAttemptAgentHost) {
+		const sessionType = agentHostEnabled ? this._findInlineAgentHostSessionType() : undefined;
+		const contribution = sessionType ? this._chatSessionsService.getChatSessionContribution(sessionType) : undefined;
+		if (sessionType) {
 			try {
-				const item = await this._chatSessionsService.createNewChatSessionItem(SessionType.AgentHostCopilot, {
+				const item = await this._chatSessionsService.createNewChatSessionItem(sessionType, {
 					prompt: '',
 					isEphemeral: true,
 					_meta: meta,
@@ -85,12 +85,22 @@ export class InlineChatSessionResolver implements IInlineChatSessionResolver {
 
 		modelRef = this._chatService.startNewLocalSession(ChatAgentLocation.EditorInline, {
 			canUseTools: false /* SEE https://github.com/microsoft/vscode/issues/279946 */,
-			sessionTypeSelectionReason: didAttemptAgentHost ? getLocalFallbackSessionTypeSelectionReason(SessionType.AgentHostCopilot, false) : undefined,
+			sessionTypeSelectionReason: sessionType ? getLocalFallbackSessionTypeSelectionReason(sessionType, false) : undefined,
 		});
 		if (token.isCancellationRequested) {
 			modelRef.dispose();
 			return undefined;
 		}
 		return { modelRef, lockToAgent: undefined };
+	}
+
+	/**
+	 * The first registered Agent Host session type that offers the editor inline
+	 * location. Celiador: its agent is the Claude provider, so try Claude before
+	 * Copilot CLI (upstream hardcoded Copilot CLI only).
+	 */
+	private _findInlineAgentHostSessionType(): string | undefined {
+		return [SessionType.AgentHostClaude, SessionType.AgentHostCopilot].find(type =>
+			this._chatSessionsService.getChatSessionContribution(type)?.locations?.includes(ChatAgentLocation.EditorInline) === true);
 	}
 }

@@ -50,6 +50,17 @@ app**, not just the dev build; each phase ships independently.
 - Audit what `vs/sessions`/agentHost already exposes for inline edit; wire a keybinding
   + widget to the daemon gateway, or build a lightweight inline-edit widget.
 - Accept/reject agent edits as inline hunks in the editor (not only the sidebar).
+- **Status (2026-10-07):** core loop works in the packaged app. The agent-host inline
+  path already existed upstream (`InlineChatEditReviewSession`: snapshot → agent writes
+  to disk → hunks with Keep ⌘Y / Undo ⌘N) but was hardcoded to Copilot CLI. Now
+  `inlineChatSessionResolver` picks the first agent-host type offering `EditorInline`
+  (Claude first) and the Claude contribution declares `EditorInline`. Verified: Cmd+I →
+  Claude (Celiador) edits only the target function, shown as inline hunks; Undo restores
+  the buffer.
+- **Next:** Cmd-K (Cursor's binding) as an alias for inline chat; fallback when Cmd+I is
+  pressed before the agent host registers (currently hands off to the sidebar); multi-file
+  edits from inline open in a side group (upstream behaviour, unverified with Claude);
+  terminal inline chat (`terminalChatSessionResolver` has the same Copilot CLI hardcoding).
 
 ## Phase 3 — Codebase context (moat #1)
 - `@`-mentions: files, symbols, folders, git, docs, web.
