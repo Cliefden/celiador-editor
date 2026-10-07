@@ -4239,6 +4239,39 @@ suite('AgentHostChatContribution', () => {
 			assert.deepStrictEqual(agentHostService.turnActions.map(d => (d.action as ITurnStartedAction).message.text), ['Hello']);
 		}));
 
+		test('Celiador: retries when the subscribe right after creating a session fails transiently', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+			// First chat after launch: the provider cannot describe the just-created
+			// session yet, so the first subscribe fails. The request must re-subscribe
+			// instead of failing with "Session state is not hydrated".
+			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
+			const createSession = agentHostService.createSession.bind(agentHostService);
+			agentHostService.createSession = async config => {
+				const session = await createSession(config);
+				agentHostService.failNextSubscriptionFor.add(session.toString());
+				agentHostService.failNextSubscriptionError.set(session.toString(), new Error(`Provider copilot could not describe ${session.toString()} yet`));
+				return session;
+			};
+
+			const sessionResource = URI.from({ scheme: 'agent-host-copilot', path: '/new-first-chat' });
+			const chatSession = await sessionHandler.provideChatSessionContent(sessionResource, CancellationToken.None);
+			disposables.add(toDisposable(() => chatSession.dispose()));
+			const turnPromise = chatAgentService.registeredAgents.get('agent-host-copilot')!.impl.invoke(
+				makeRequest({ message: 'First chat', sessionResource }),
+				() => { }, [], CancellationToken.None,
+			);
+			// Longer than the first retry delay.
+			await timeout(1000);
+
+			const dispatch = agentHostService.turnActions[0];
+			assert.ok(dispatch, 'the turn must start after re-subscribing');
+			const action = dispatch.action as ITurnStartedAction;
+			agentHostService.fireAction({ channel: dispatch.channel.toString(), action: dispatch.action, serverSeq: 1, origin: { clientId: agentHostService.clientId, clientSeq: dispatch.clientSeq } });
+			agentHostService.fireAction({ channel: dispatch.channel.toString(), action: { type: 'chat/turnComplete', turnId: action.turnId, endedAt: '2025-01-01T00:00:00.000Z' } as ChatAction, serverSeq: 2, origin: undefined });
+			await turnPromise;
+
+			assert.deepStrictEqual(agentHostService.turnActions.map(d => (d.action as ITurnStartedAction).message.text), ['First chat']);
+		}));
+
 		test('rejects generic contributed-chat untitled resource', async () => {
 			const { sessionHandler, agentHostService, chatAgentService } = createContribution(disposables);
 

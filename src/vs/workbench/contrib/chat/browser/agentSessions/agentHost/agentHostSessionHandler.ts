@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { status } from '../../../../../../base/browser/ui/aria/aria.js';
-import { Delayer, disposableTimeout, raceCancellation } from '../../../../../../base/common/async.js';
+import { Delayer, disposableTimeout, raceCancellation, timeout } from '../../../../../../base/common/async.js';
 import { decodeBase64, encodeBase64, VSBuffer } from '../../../../../../base/common/buffer.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { CancellationError, getErrorCode, isCancellationError } from '../../../../../../base/common/errors.js';
@@ -1038,6 +1038,9 @@ class ActiveClientEntry extends Disposable {
 		}, delay).catch(() => { /* delayer disposed */ });
 	}
 }
+
+/** Celiador: backoff for re-subscribing to a just-created session whose first subscribe failed transiently. */
+const SESSION_SUBSCRIBE_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
 
 export class AgentHostSessionHandler extends Disposable implements IChatSessionContentProvider {
 
@@ -5663,7 +5666,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 
 		// Subscribe to the new session's state
 		onFailureStage?.('subscribeSession');
-		const newSub = this._ensureSessionSubscription(session.toString());
+		let newSub = this._ensureSessionSubscription(session.toString());
 		this._configureActiveClientReconciliation(sessionResource, session, newSub);
 		if (!this._getSessionState(session.toString())) {
 			// Wait for the subscription to hydrate. `_whenSubscriptionHydrated`
@@ -5675,6 +5678,18 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			// subscription via `setError`, which fires `onDidError` but NOT
 			// `onDidChange`, so an `onDidChange`-only wait would hang for the
 			// full turn timeout (issue #5242).
+			await this._whenSubscriptionHydrated(newSub, CancellationToken.None);
+		}
+		// Celiador: right after creation — typically the first chat after launch — the
+		// host can answer the subscribe with a transient "Provider … could not describe
+		// <session> yet" while the provider's session catalogue is still warming up.
+		// Re-subscribe with a short backoff instead of failing the request with
+		// "Session state is not hydrated".
+		for (let attempt = 0; newSub.value instanceof Error && attempt < SESSION_SUBSCRIBE_RETRY_DELAYS_MS.length; attempt++) {
+			this._logService.info(`[AgentHost] Subscribe to ${session.toString()} failed (${newSub.value.message}); retrying`);
+			await timeout(SESSION_SUBSCRIBE_RETRY_DELAYS_MS[attempt]);
+			newSub = this._ensureSessionSubscription(session.toString());
+			this._configureActiveClientReconciliation(sessionResource, session, newSub);
 			await this._whenSubscriptionHydrated(newSub, CancellationToken.None);
 		}
 
