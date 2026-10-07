@@ -8,7 +8,7 @@ import { resolveDaemonUrl } from "./productConfig";
 
 // The agent itself is the native Agents Window (Claude Agent SDK), routed through the
 // daemon's first-party gateway. This extension is the thin identity + companion shell:
-// it owns Celiador sign-in, exposes the Supabase session as a VS Code authentication
+// it owns Celiador sign-in and the balance/billing surface, exposes the Supabase session as a VS Code authentication
 // provider (so the agent host can resolve a daemon token), surfaces a git-review
 // "Changes" view, and serves account/history commands. The former in-extension 3-tool
 // agent loop, BYO-key path, Jev, and chat webview were retired in favour of the
@@ -18,6 +18,51 @@ let auth: Auth | undefined;
 
 function daemonUrl(): string {
   return resolveDaemonUrl();
+}
+
+interface Balance {
+  plan: string;
+  planLabel: string;
+  includedUsd: number;
+  spentUsd: number;
+  topUpUsd: number;
+  remainingUsd: number;
+  period: string;
+}
+
+/** GET /api/me — identity, plan and what is left. Undefined when signed out or unreachable. */
+async function fetchMe(): Promise<{ balance: Balance } | undefined> {
+  if (!auth || !(await auth.isSignedIn())) return undefined;
+  try {
+    const res = await fetch(`${daemonUrl()}/api/me`, { headers: { Authorization: `Bearer ${await auth.getAccessToken()}` } });
+    if (!res.ok) return undefined;
+    return (await res.json()) as { balance: Balance };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Open a Stripe Checkout or Customer Portal session in the browser. */
+async function openBilling(path: "checkout" | "portal", body: Record<string, unknown>): Promise<void> {
+  if (!auth || !(await auth.isSignedIn())) {
+    void vscode.window.showWarningMessage("Sign in to Celiador first.");
+    return;
+  }
+  try {
+    const res = await fetch(`${daemonUrl()}/api/billing/${path}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await auth.getAccessToken()}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+    if (!res.ok || !payload.url) {
+      void vscode.window.showErrorMessage(`Billing unavailable: ${payload.error ?? res.status}`);
+      return;
+    }
+    await vscode.env.openExternal(vscode.Uri.parse(payload.url));
+  } catch (err: any) {
+    void vscode.window.showErrorMessage(`Billing unavailable: ${err?.message ?? err}`);
+  }
 }
 
 async function probeDaemon(): Promise<string> {
@@ -165,6 +210,44 @@ export function activate(context: vscode.ExtensionContext): void {
       } catch (err: any) {
         void vscode.window.showErrorMessage(`Couldn't load chats: ${err?.message ?? err}`);
       }
+    })
+  );
+
+  // Balance status item — what's left this period; click to top up or change plan.
+  const balanceStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  balanceStatus.command = "celiador.manageBilling";
+  const refreshBalance = async () => {
+    const me = await fetchMe();
+    if (!me) {
+      balanceStatus.hide();
+      return;
+    }
+    const balance = me.balance;
+    balanceStatus.text = `$(sparkle) $${balance.remainingUsd.toFixed(2)}`;
+    balanceStatus.tooltip =
+      `Celiador ${balance.planLabel} — $${balance.remainingUsd.toFixed(2)} left ` +
+      `($${balance.spentUsd.toFixed(2)} of $${balance.includedUsd.toFixed(2)} included this period` +
+      `${balance.topUpUsd > 0 ? `, plus $${balance.topUpUsd.toFixed(2)} credits` : ""}).\nClick to manage billing.`;
+    balanceStatus.show();
+  };
+  context.subscriptions.push(balanceStatus, auth.onDidChange(() => void refreshBalance()));
+  void refreshBalance();
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.manageBilling", async () => {
+      const me = await fetchMe();
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: "Add credits", id: "credits", detail: "One-off top-up — no subscription change" },
+          { label: "Change plan", id: "plan", detail: "Upgrade, downgrade or cancel" },
+          { label: "Refresh balance", id: "refresh" },
+        ],
+        { placeHolder: me ? `${me.balance.planLabel} — $${me.balance.remainingUsd.toFixed(2)} left` : "Celiador billing" }
+      );
+      if (!pick) return;
+      if (pick.id === "refresh") return void refreshBalance();
+      if (pick.id === "plan") return void openBilling("portal", {});
+      return void openBilling("checkout", me?.balance.plan === "free" ? { plan: "builder" } : {});
     })
   );
 

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
+import { getRestrictedSetting } from "./config";
 
 // Per-channel defaults come from the build's product.json (dev/staging/prod
 // builds ship different values), while the `celiador.daemonUrl` setting lets an
@@ -26,11 +27,12 @@ function product(): { celiadorDaemonUrl?: string } {
 
 /**
  * Resolve the daemon base URL for this build.
- * Order: explicit `celiador.daemonUrl` setting → product.json `celiadorDaemonUrl`
+ * Order: explicit user-scope `celiador.daemonUrl` setting → product.json `celiadorDaemonUrl`
  * → hardcoded prod fallback. Trailing slashes are stripped.
  */
 export function resolveDaemonUrl(): string {
-  const setting = vscode.workspace.getConfiguration("celiador").get<string>("daemonUrl");
+  // User/global scope only — a workspace must not be able to redirect the token.
+  const setting = getRestrictedSetting<string>("daemonUrl", "");
   const url = setting || product().celiadorDaemonUrl || FALLBACK_DAEMON_URL;
   return url.replace(/\/+$/, "");
 }

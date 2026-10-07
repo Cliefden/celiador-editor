@@ -160,11 +160,10 @@ export class CeliadorRelayClient extends Disposable {
 	}
 
 	override dispose(): void {
+		// Drain buffered events (e.g. the final state/done) before going inert, so the
+		// phone isn't left showing a run as still in progress.
+		void this._flush();
 		this._disposed = true;
-		if (this._flushTimer) {
-			clearTimeout(this._flushTimer);
-			this._flushTimer = undefined;
-		}
 		this._commandAbort?.abort();
 		super.dispose();
 	}

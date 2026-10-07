@@ -68,6 +68,11 @@
         "command": "celiador.pastChats",
         "title": "Celiador: Past Chats",
         "category": "Celiador"
+      },
+      {
+        "command": "celiador.manageBilling",
+        "title": "Celiador: Manage Billing",
+        "category": "Celiador"
       }
     ],
     "viewsContainers": {
@@ -100,13 +105,15 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Base URL of the Celiador daemon. Leave empty to use this build's default (`celiadorDaemonUrl` in `product.json`): prod → `https://celiador.ai`, staging → `https://staging.celiador.ai`, dev → `http://localhost:4661`.",
-          "scope": "application"
+          "scope": "application",
+          "restricted": true
         },
         "celiador.supabaseUrl": {
           "type": "string",
           "default": "",
           "markdownDescription": "Override the Supabase/GoTrue base URL used for sign-in. Leave empty to use the value from the daemon's `GET /api/config` (self-hosted defaults to the daemon URL).",
-          "scope": "application"
+          "scope": "application",
+          "restricted": true
         }
       }
     }
@@ -114,11 +121,18 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js",
+    "test:unit": "npm run compile && node ./out/test/unit/run-unit-tests.js"
   },
   "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.0",
     "@types/node": "^22.0.0",
-    "@types/vscode": "^1.138.0",
+    "@vscode/test-electron": "^2.3.0",
+    "glob": "^10.0.0",
+    "mocha": "^10.2.0",
     "typescript": "^5.6.0"
   }
 }
