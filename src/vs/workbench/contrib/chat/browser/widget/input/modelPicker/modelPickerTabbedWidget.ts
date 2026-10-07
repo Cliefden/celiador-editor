@@ -15,6 +15,7 @@ import { ITabBarAction, ITabDescriptor, TabbedActionListWidget } from '../../../
 import { IInstantiationService } from '../../../../../../../platform/instantiation/common/instantiation.js';
 import { IOpenerService } from '../../../../../../../platform/opener/common/opener.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../../platform/storage/common/storage.js';
+import { IProductService } from '../../../../../../../platform/product/common/productService.js';
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { URI } from '../../../../../../../base/common/uri.js';
 import { IChatEntitlementService } from '../../../../../../services/chat/common/chatEntitlementService.js';
@@ -114,6 +115,7 @@ export class TabbedModelPicker extends Disposable {
 		@ILanguageModelsService private readonly _languageModelsService: ILanguageModelsService,
 		@IOpenerService private readonly _openerService: IOpenerService,
 		@IStorageService private readonly _storageService: IStorageService,
+		@IProductService private readonly _productService: IProductService,
 	) {
 		super();
 		this._widget = this._register(instantiationService.createInstance(TabbedActionListWidget));
@@ -247,7 +249,8 @@ export class TabbedModelPicker extends Disposable {
 	}
 
 	private _buildDestinations(context: ITabbedModelPickerContext): IModelPickerDestination[] {
-		return buildModelPickerDestinations(context.models, this._languageModelsService, context.providerPlaceholders);
+		// Celiador: hide the GitHub Copilot provider tab — the daemon (agentHost) model is the only provider.
+		return buildModelPickerDestinations(context.models, this._languageModelsService, context.providerPlaceholders, this._productService.nameShort !== 'Code - OSS');
 	}
 
 	private _rememberSpeedVariant(modelIdentifier: string): void {
