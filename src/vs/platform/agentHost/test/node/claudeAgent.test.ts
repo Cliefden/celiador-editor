@@ -1361,6 +1361,13 @@ suite('ClaudeAgent', () => {
 			authorization_servers: ['https://github.com/login/oauth'],
 			scopes_supported: ['repo'],
 			required: false,
+		}, {
+			// Celiador: the daemon gateway resource, always advertised and optional.
+			resource: 'https://celiador.ai/api/anthropic',
+			resource_name: 'Celiador',
+			authorization_servers: ['https://celiador.ai'],
+			scopes_supported: [],
+			required: false,
 		}]);
 	});
 
@@ -1377,6 +1384,7 @@ suite('ClaudeAgent', () => {
 			resources: [
 				{ resource: 'https://ghe.acme.com/api/v3', servers: ['https://ghe.acme.com/login/oauth'] },
 				{ resource: 'https://ghe.acme.com/api/v3/repos', servers: ['https://ghe.acme.com/login/oauth'] },
+				{ resource: 'https://celiador.ai/api/anthropic', servers: ['https://celiador.ai'] },
 			],
 			acceptsEnterpriseCopilot: true,
 			rejectsDotCom: false,
@@ -1445,6 +1453,7 @@ suite('ClaudeAgent', () => {
 				resources: [
 					{ resource: 'https://api.github.com', required: false },
 					{ resource: 'https://api.github.com/repos', required: false },
+					{ resource: 'https://celiador.ai/api/anthropic', required: false },
 				],
 				proxyStarts: 0,
 			},
@@ -1452,6 +1461,7 @@ suite('ClaudeAgent', () => {
 				resources: [
 					{ resource: 'https://api.github.com', required: false },
 					{ resource: 'https://api.github.com/repos', required: false },
+					{ resource: 'https://celiador.ai/api/anthropic', required: false },
 				],
 				proxyStarts: 1,
 			},
@@ -6630,6 +6640,7 @@ suite('ClaudeAgent — per-session provider', () => {
 		assert.deepStrictEqual(optional.map(r => ({ resource: r.resource, required: r.required })), [
 			{ resource: 'https://api.github.com', required: false },
 			{ resource: 'https://api.github.com/repos', required: false },
+			{ resource: 'https://celiador.ai/api/anthropic', required: false },
 		]);
 	});
 

@@ -86,6 +86,7 @@ export class ExtensionManagementService extends AbstractExtensionManagementServi
 		@IDownloadService private downloadService: IDownloadService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IFileService private readonly fileService: IFileService,
+		// @ts-expect-error no-unused-variable
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IExtensionGalleryManifestService protected readonly extensionGalleryManifestService: IExtensionGalleryManifestService,
 		@IProductService productService: IProductService,

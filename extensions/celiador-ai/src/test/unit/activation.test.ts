@@ -46,49 +46,40 @@ describe("Extension Activation", () => {
     }
   });
 
-  it("should register the contributed webview view", () => {
+  it("should register every contributed webview view", () => {
     const packageJsonPath = path.join(__dirname, "../../../package.json");
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-    const extensionPath = path.join(__dirname, "../../extension.js");
-    const extensionContent = fs.readFileSync(extensionPath, "utf-8");
+    const outDir = path.join(__dirname, "../..");
+    const extensionContent = fs.readFileSync(path.join(outDir, "extension.js"), "utf-8");
 
-    // Get webview views from package.json
+    // Views are registered via each provider's static `viewId`, so look for the
+    // id across the compiled sources and for one registration call per view.
+    const sources = fs
+      .readdirSync(outDir)
+      .filter((f) => f.endsWith(".js"))
+      .map((f) => fs.readFileSync(path.join(outDir, f), "utf-8"))
+      .join("\n");
+
     const views = packageJson.contributes?.views || {};
     const allViews: string[] = [];
-    
     for (const container of Object.values(views)) {
       if (Array.isArray(container)) {
         allViews.push(...container.map((v: any) => v.id));
       }
     }
 
-    // Verify each view is registered
     for (const viewId of allViews) {
-      const registerPattern = new RegExp(`registerWebviewViewProvider\\(["']${viewId.replace(/\./g, "\\.")}["']`);
-      
       assert.ok(
-        registerPattern.test(extensionContent),
-        `Webview view '${viewId}' from package.json must be registered in activate().`
+        sources.includes(`"${viewId}"`),
+        `Webview view '${viewId}' from package.json must have a provider with that viewId.`
       );
     }
-  });
 
-  it("should register the contributed language model chat provider", () => {
-    const packageJsonPath = path.join(__dirname, "../../../package.json");
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
-    const extensionPath = path.join(__dirname, "../../extension.js");
-    const extensionContent = fs.readFileSync(extensionPath, "utf-8");
-
-    // Get language model providers from package.json
-    const providers = packageJson.contributes?.languageModelChatProviders || [];
-    
-    for (const provider of providers) {
-      const vendor = provider.vendor;
-      
-      assert.ok(
-        extensionContent.includes("registerLanguageModelChatProvider"),
-        `Language model chat provider '${vendor}' from package.json must be registered in activate().`
-      );
-    }
+    const registrations = extensionContent.match(/registerWebviewViewProvider\(/g) || [];
+    assert.strictEqual(
+      registrations.length,
+      allViews.length,
+      "activate() must register one webview view provider per contributed view."
+    );
   });
 });

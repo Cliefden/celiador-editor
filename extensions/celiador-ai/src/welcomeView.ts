@@ -18,7 +18,7 @@ export class CeliadorWelcomeViewProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = this.html(webviewView.webview);
+    webviewView.webview.html = this.html();
 
     webviewView.webview.onDidReceiveMessage((msg) => {
       switch (msg?.type) {
@@ -55,7 +55,7 @@ export class CeliadorWelcomeViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private html(webview: vscode.Webview): string {
+  private html(): string {
     const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">

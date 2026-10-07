@@ -12,6 +12,7 @@ import { IInlineCompletionsService } from '../../../../../editor/browser/service
 import { ContextKeyExpression, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { MockContextKeyService } from '../../../../../platform/keybinding/test/common/mockKeybindingService.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
+import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { ChatEntitlement, IChatEntitlementService, IChatSentiment } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService } from '../../../../services/statusbar/browser/statusbar.js';
@@ -153,6 +154,8 @@ suite('ChatStatusBarEntry', () => {
 			deleteEntry: () => { },
 		});
 		instantiationService.stub(IMarkdownRendererService, { _serviceBrand: undefined });
+		// Celiador: the Copilot status item is hidden outside Code - OSS; these tests cover the upstream behaviour.
+		instantiationService.stub(IProductService, { ...instantiationService.get(IProductService), nameShort: 'Code - OSS' });
 		const contextKeyService = instantiationService.get(IContextKeyService);
 		UpdateTitleBarContext.bindTo(contextKeyService).set(opts.updateTitleBar ?? false);
 		UpdateTitleBarChatInProgressContext.bindTo(contextKeyService).set(opts.updateTitleBarChatInProgress ?? false);

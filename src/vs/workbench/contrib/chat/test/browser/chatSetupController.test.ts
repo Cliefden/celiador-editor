@@ -80,7 +80,7 @@ suite('ChatSetupController', () => {
 			new class extends mock<ILifecycleService>() { }(),
 			new class extends mock<IQuickInputService>() { }(),
 			new class extends mock<IDefaultAccountService>() { }(),
-			new class extends mock<IProductService>() { }(),
+			new class extends mock<IProductService>() { override readonly nameShort = 'Code - OSS'; }(),
 		));
 
 		const resultPromise = controller.setup({ forceSignIn: true, cancellationToken: cancellation.token });
@@ -90,5 +90,35 @@ suite('ChatSetupController', () => {
 		pendingSignIn.complete({});
 
 		assert.strictEqual(result, undefined);
+	});
+
+	test('is a no-op outside Code - OSS (Celiador)', async () => {
+		let signInCalled = false;
+		const requests = new class extends mock<ChatEntitlementRequests>() {
+			override signIn(): Promise<Awaited<ReturnType<ChatEntitlementRequests['signIn']>>> {
+				signInCalled = true;
+				return Promise.resolve({});
+			}
+		}();
+		const controller = disposables.add(new ChatSetupController(
+			new class extends mock<ChatEntitlementContext>() { override readonly onDidChange = Event.None; }(),
+			requests,
+			new NullTelemetryServiceShape(),
+			new class extends mock<IExtensionsWorkbenchService>() { }(),
+			new NullLogService(),
+			new class extends mock<IProgressService>() { }(),
+			new class extends mock<IActivityService>() { }(),
+			new class extends mock<ICommandService>() { }(),
+			new class extends mock<IDialogService>() { }(),
+			new class extends mock<IConfigurationService>() { }(),
+			new class extends mock<ILifecycleService>() { }(),
+			new class extends mock<IQuickInputService>() { }(),
+			new class extends mock<IDefaultAccountService>() { }(),
+			new class extends mock<IProductService>() { override readonly nameShort = 'Celiador'; }(),
+		));
+
+		const result = await controller.setup({ forceSignIn: true });
+
+		assert.deepStrictEqual({ result, signInCalled }, { result: undefined, signInCalled: false });
 	});
 });

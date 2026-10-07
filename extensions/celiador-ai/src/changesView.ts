@@ -23,7 +23,7 @@ export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = this.html(webviewView.webview);
+    webviewView.webview.html = this.html();
 
     webviewView.webview.onDidReceiveMessage(async (msg) => {
       if (msg?.type === "refresh") {
@@ -72,7 +72,7 @@ export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private html(webview: vscode.Webview): string {
+  private html(): string {
     const nonce = getNonce();
     return `<!DOCTYPE html>
 <html lang="en">

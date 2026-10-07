@@ -181,7 +181,8 @@ suite('ModelPickerTelemetry', () => {
 			override pinModel(id: string) { pinnedModelIds.push(id); }
 			override unpinModel(id: string) { pinnedModelIds.splice(pinnedModelIds.indexOf(id), 1); }
 		}());
-		instantiationService.stub(IProductService, { version: '1.100.0' });
+		// Celiador: the built-in (Copilot) tab is hidden outside Code - OSS; these tests cover the upstream picker.
+		instantiationService.stub(IProductService, { version: '1.100.0', nameShort: 'Code - OSS' });
 		const entitlementService = new TestChatEntitlementService();
 		entitlementService.entitlement = ChatEntitlement.Pro;
 		instantiationService.stub(IChatEntitlementService, entitlementService);
