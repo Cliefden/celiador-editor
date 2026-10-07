@@ -1308,6 +1308,24 @@ export class AgentSideEffects extends Disposable {
 			: await this._permissionManager.getAutoApproval(approvalEvent, sessionKey);
 		const part = this._stateManager.getSessionState(sessionKey)?.activeTurn?.responseParts.find(part => part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === e.state.toolCallId);
 		const toolCall = part?.kind === ResponsePartKind.ToolCall ? part.toolCall : undefined;
+		// Celiador: the workbench runs a client tool as soon as its input is complete and
+		// confirms it itself, which can be before a provider (Claude) asks for permission.
+		// When that late request arrives the call is already running or finished: answer
+		// the provider directly (it then collects the result the workbench delivers) and
+		// do NOT dispatch a new ready action — that would move the call back to
+		// pending-confirmation, invalidate the workbench's in-flight run and drop its
+		// result, hanging the turn.
+		if (toolCall
+			&& (e.state.contributor ?? toolCall.contributor)?.kind === ToolCallContributorKind.Client
+			&& toolCall.status !== ToolCallStatus.Streaming
+			&& toolCall.status !== ToolCallStatus.PendingConfirmation) {
+			const toolCallKey = `${sessionKey}:${e.state.toolCallId}`;
+			this._toolCallAgents.delete(toolCallKey);
+			this._managedApprovalToolCalls.delete(toolCallKey);
+			this._logService.trace(`[AgentSideEffects] Client tool ${e.state.toolCallId} already ${toolCall.status}; answering the provider's permission request directly`);
+			agent.respondToPermissionRequest(e.state.toolCallId, toolCall.status !== ToolCallStatus.Cancelled);
+			return;
+		}
 		if (toolCall
 			&& toolCall.status !== ToolCallStatus.Streaming
 			&& toolCall.status !== ToolCallStatus.Running

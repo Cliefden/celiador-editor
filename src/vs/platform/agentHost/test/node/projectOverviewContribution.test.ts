@@ -76,7 +76,7 @@ suite('ProjectOverviewContribution', () => {
 				'- AGENTS.md',
 				'- package.json',
 				'- src/',
-				'Use this to orient yourself before searching.',
+				'Use this to orient yourself before searching. To find where a named symbol is defined, prefer the workspace-symbol tool (if available) over a text search.',
 				'',
 				'The project\'s AGENTS.md (its instructions for coding agents; follow them):',
 				'<agents_md>',
