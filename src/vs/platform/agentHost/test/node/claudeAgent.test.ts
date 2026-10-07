@@ -5953,6 +5953,37 @@ suite('ClaudeAgent', () => {
 		assert.strictEqual(settled, false, 'no parked handler in this test path; unknown id is silent');
 	});
 
+	test('Celiador: a client tool completion that beats the MCP handler is buffered, not dropped', async () => {
+		// A fast client tool can finish in the workbench before the SDK invokes the
+		// in-process MCP handler that parks the deferred; dropping that result
+		// deadlocked the turn.
+		const { agent, sdk } = createTestContext(disposables);
+		await agent.authenticate(GITHUB_COPILOT_PROTECTED_RESOURCE.resource, 'tok');
+		const created = await createSession(agent, { workingDirectories: [URI.file('/work')] });
+		const sessionId = created.sdkSessionId;
+		getOrCreateActiveClient(agent, defaultChatUri(created.session), 'c1').tools = [{ name: 'echo', inputSchema: { type: 'object' } }];
+		sdk.nextQueryMessages = [
+			makeSystemInitMessage(sessionId),
+			makeStreamEvent(sessionId, makeMessageStart()),
+			makeStreamEvent(sessionId, makeContentBlockStartToolUse(0, 'tu_echo', 'mcp__client__echo')),
+			makeStreamEvent(sessionId, makeContentBlockStop(0)),
+			makeStreamEvent(sessionId, makeMessageStop()),
+			makeResultSuccess(sessionId),
+		];
+		await agent.chats.sendMessage(defaultChatUri(created.session), 'go', undefined, undefined, 'turn-1', undefined, undefined, chatContext(defaultChatUri(created.session)));
+
+		const session = agent.getSessionForTesting(created.session)!;
+		const settled = session.completeClientToolCall('tu_echo', { success: true, pastTenseMessage: 'ok', content: [{ type: ToolResultContentType.Text, text: 'hello' }] });
+		const buffered = session.pendingClientToolCalls.hasBufferedResult('tu_echo');
+		const result = await session.pendingClientToolCalls.register('tu_echo');
+
+		assert.deepStrictEqual({ settled, buffered, text: result.content[0] }, {
+			settled: true,
+			buffered: true,
+			text: { type: 'text', text: 'hello' },
+		});
+	});
+
 	test('onClientToolCallComplete walks subagent URIs to the root session', () => {
 		const { agent } = createTestContext(disposables);
 		const root = URI.parse('claude:/root-1');

@@ -85,7 +85,7 @@ export class ClientToolSetsContribution extends Disposable implements IWorkbench
 			description: product.nameShort, // Celiador: product name
 			detail: localize('clientToolSet.vscode.detail', "Navigate code, manage extensions, and run built-in {0} commands.", product.nameShort), // Celiador: product name
 			members: [
-				...(workspaceService.isSessionsWindow ? [] : ['runTests', 'testFailure', 'rename', 'usages']),
+				...(workspaceService.isSessionsWindow ? [] : ['runTests', 'testFailure', 'rename', 'usages', 'workspaceSymbols']), // Celiador: + workspaceSymbols
 				'toolSearch',
 			],
 		}));

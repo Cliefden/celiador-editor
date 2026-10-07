@@ -54,6 +54,7 @@ import { hasClientPluginMcpDefaultCwds, readClientPluginMcpDefaultCwd } from '..
 import { ClaudeSdkPipeline, IRematerializer, type ISdkResolvedCustomizations } from './claudeSdkPipeline.js';
 import { SubagentRegistry } from './claudeSubagentRegistry.js';
 import { ClaudePermissionKind } from './claudeToolDisplay.js';
+import { ClaudeExplorationTracker } from './claudeExplorationTracker.js'; // Celiador
 import { getSdkMcpServerEnablement, isCustomizationSdkEligible, resolveCustomizationEnablement } from '../shared/customizationEnablementGate.js';
 import { McpServerType, type IMcpServerConfiguration } from '../../../mcp/common/mcpPlatformTypes.js';
 import { AgentHostGitHubMcpServerEnabledConfigKey, platformRootSchema } from '../../common/agentHostSchema.js';
@@ -315,6 +316,9 @@ export class ClaudeAgentSession extends Disposable {
 	readonly clientCustomizationsDiff: SessionClientCustomizationsDiff = this._register(new SessionClientCustomizationsDiff());
 
 	private readonly _onDidSessionProgress = this._register(new Emitter<AgentSignal>());
+	private readonly _explorationTracker = new ClaudeExplorationTracker(); // Celiador
+	/** Celiador: ids of client tool calls started but not yet completed. */
+	private readonly _clientToolCallIds = new Set<string>();
 	readonly onDidSessionProgress: Event<AgentSignal> = this._onDidSessionProgress.event;
 
 	/**
@@ -416,6 +420,24 @@ export class ClaudeAgentSession extends Disposable {
 	 * customization data; the stream mapper stays free of it. (The in-process
 	 * `mcp__client__` server already carries a Client contributor from the mapper.)
 	 */
+	/** Celiador: remembers client (workbench) tool calls so an early completion can be buffered. */
+	private _trackClientToolCall(signal: AgentSignal): void {
+		if (signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallStart && signal.action.contributor?.kind === ToolCallContributorKind.Client) {
+			this._clientToolCallIds.add(signal.action.toolCallId);
+		}
+	}
+
+	/**
+	 * Celiador: logs how many search/read calls each turn made before its first
+	 * edit — the signal for whether semantic search is needed (docs/CODEBASE_CONTEXT.md).
+	 */
+	private _logExploration(signal: AgentSignal): void {
+		const turn = this._explorationTracker.observe(signal);
+		if (turn) {
+			this._logService.info(`[Claude:${this.sessionId}] exploration turnId=${turn.turnId} beforeFirstEdit=${turn.explorationBeforeFirstEdit} searches=${turn.searchesBeforeFirstEdit} toolCalls=${turn.toolCalls} edited=${turn.edited}`);
+		}
+	}
+
 	private _enrichSignalWithMcpContributor(signal: AgentSignal): AgentSignal {
 		if (signal.kind !== 'action' || signal.action.type !== ActionType.ChatToolCallStart || signal.action.contributor !== undefined) {
 			return signal;
@@ -682,7 +704,11 @@ export class ClaudeAgentSession extends Disposable {
 			await warm[Symbol.asyncDispose]();
 			throw err;
 		}
-		this._register(pipeline.onDidProduceSignal(s => this._onDidSessionProgress.fire(this._enrichSignalWithMcpContributor(this._enrichSignalWithCredits(s)))));
+		this._register(pipeline.onDidProduceSignal(s => {
+			this._logExploration(s); // Celiador
+			this._trackClientToolCall(s); // Celiador
+			this._onDidSessionProgress.fire(this._enrichSignalWithMcpContributor(this._enrichSignalWithCredits(s)));
+		}));
 		this._pipeline = pipeline;
 		this._register(this._configurationService.onDidSessionConfigChange(event => {
 			if (!event.origin || event.session !== ctx.configResource.toString()) {
@@ -1383,6 +1409,14 @@ export class ClaudeAgentSession extends Disposable {
 	 */
 	completeClientToolCall(toolCallId: string, result: ToolCallResult): boolean {
 		const converted = convertToolCallResult(result, toolCallId);
+		// Celiador: a fast client tool can complete in the workbench before the SDK
+		// invokes our MCP handler (which registers the deferred). Buffer the result for
+		// known client calls so the handler resolves immediately instead of deadlocking
+		// the turn; other ids (SDK-owned tools) stay a no-op so nothing is retained.
+		if (this._clientToolCallIds.delete(toolCallId) && !this._pendingClientToolCalls.has(toolCallId)) {
+			this._pendingClientToolCalls.respondOrBuffer(toolCallId, converted);
+			return true;
+		}
 		return this._pendingClientToolCalls.respond(toolCallId, converted);
 	}
 
