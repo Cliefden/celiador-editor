@@ -74,6 +74,9 @@ app**, not just the dev build; each phase ships independently.
 - `@`-mentions: files, symbols, folders, git, docs, web.
 - Semantic codebase indexing (embeddings) for retrieval. Decision: **daemon-side**
   (fits daemon-as-hub + mobile) vs local. Largest item; its own design.
+- **Design proposal:** `docs/CODEBASE_CONTEXT.md` (options A–D, recommendation, open
+  decisions). Verified today: `#file:` / Add Context references reach the Claude agent,
+  which also searches on its own with Grep/Glob/Read; no semantic index exists.
 
 ## Phase 4 — Tab autocomplete (moat #2)
 - Model-backed multi-line / next-edit completion via a fast model through the daemon,
