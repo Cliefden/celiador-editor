@@ -29,14 +29,21 @@ export interface IRelayCommand {
 	readonly kind?: string;
 	readonly text?: string;
 	readonly requestId?: string;
+	/** fs.* commands: the workspace-relative path to operate on. */
+	readonly path?: string;
+	/** fs.write: the new file contents. */
+	readonly content?: string;
 }
+
+/** The kinds of filesystem command the phone can round-trip to this runner. */
+export type RelayFsKind = 'fs.list' | 'fs.read' | 'fs.write';
 
 /** Debounce window for coalescing high-frequency events (streamed deltas). */
 const FLUSH_MS = 150;
 /** Reconnect backoff for the command channel. */
 const RECONNECT_MS = 1500;
 /** Kinds that should reach the phone immediately rather than wait for a flush. */
-const URGENT = new Set(['approval', 'question', 'state', 'done', 'error']);
+const URGENT = new Set(['approval', 'question', 'state', 'done', 'error', 'fs.result']);
 /** Delivery attempts per batch before it's dropped (relay is best-effort). */
 const MAX_ATTEMPTS = 3;
 
@@ -55,6 +62,12 @@ export interface ICeliadorRelayClientOptions {
 	readonly onCancel?: () => void;
 	/** The phone approved (true) or rejected (false) a pending request. */
 	readonly onApprovalDecision?: (requestId: string, approved: boolean) => void;
+	/**
+	 * The phone requested a workspace file operation (browse / read / edit). The
+	 * handler performs it and replies by publishing an `fs.result` event carrying
+	 * the same `requestId`.
+	 */
+	readonly onFsCommand?: (kind: RelayFsKind, requestId: string, path: string, content: string | undefined) => void;
 }
 
 export class CeliadorRelayClient extends Disposable {
@@ -281,6 +294,8 @@ export class CeliadorRelayClient extends Disposable {
 			this._options.onCancel?.();
 		} else if ((cmd.kind === 'approve' || cmd.kind === 'reject') && cmd.requestId) {
 			this._options.onApprovalDecision?.(cmd.requestId, cmd.kind === 'approve');
+		} else if ((cmd.kind === 'fs.list' || cmd.kind === 'fs.read' || cmd.kind === 'fs.write') && cmd.requestId) {
+			this._options.onFsCommand?.(cmd.kind, cmd.requestId, cmd.path ?? '', cmd.content);
 		}
 	}
 
