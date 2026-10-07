@@ -93,7 +93,7 @@ export class ProjectOverviewContribution extends Disposable implements IAgentHos
 			`The workspace root is ${rootPath}. Its top-level entries (directories end with "/"):`,
 			...entries.slice(0, MaxRootEntries).map(entry => `- ${entry}`),
 			...(entries.length > MaxRootEntries ? [`- … and ${entries.length - MaxRootEntries} more`] : []),
-			'Use this to orient yourself before searching.',
+			'Use this to orient yourself before searching. To find where a named symbol is defined, prefer the workspace-symbol tool (if available) over a text search.',
 		];
 		if (agentsFile) {
 			lines.push('', 'The project\'s AGENTS.md (its instructions for coding agents; follow them):', '<agents_md>', agentsFile, '</agents_md>');

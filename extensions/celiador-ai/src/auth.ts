@@ -8,6 +8,10 @@ import { resolveDaemonUrl } from "./productConfig";
 // `Authorization: Bearer` — the shared cross-client auth contract.
 
 const SESSION_KEY = "celiador.session";
+/** Refresh this long before the access token expires. */
+const REFRESH_LEAD_SECONDS = 120;
+/** Retry delay after a failed background refresh (e.g. offline). */
+const REFRESH_RETRY_MS = 60_000;
 const PKCE_KEY = "celiador.pkce";
 // VS Code routes deep links as celiador://<publisher>.<extension><path> to the
 // extension's UriHandler. GoTrue's redirect allowlist must contain this exactly.
@@ -39,6 +43,7 @@ export class Auth {
   private cached: Session | null | undefined;
   private supaConfig: { base: string; anonKey: string } | undefined;
   private readonly onChange = new vscode.EventEmitter<void>();
+  private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   /** Fires whenever the signed-in state changes (sign in/out/refresh). */
   readonly onDidChange = this.onChange.event;
 
@@ -196,6 +201,7 @@ export class Auth {
   private async store(s: Session): Promise<void> {
     this.cached = s;
     await this.secrets.store(SESSION_KEY, JSON.stringify(s));
+    this.scheduleRefresh(s);
     this.onChange.fire();
   }
 
@@ -203,10 +209,29 @@ export class Auth {
     if (this.cached !== undefined) return this.cached;
     const raw = await this.secrets.get(SESSION_KEY);
     this.cached = raw ? (JSON.parse(raw) as Session) : null;
+    if (this.cached) this.scheduleRefresh(this.cached);
     return this.cached;
   }
 
+  /**
+   * Refresh the session shortly before it expires. Consumers that were handed a token
+   * once (the agent host's daemon transport, via the auth provider) never ask again, so
+   * without this every request fails with 401 an hour after sign-in. A refresh goes
+   * through `store`, which fires `onDidChange` and re-forwards the new token.
+   */
+  private scheduleRefresh(s: Session, delayMs?: number): void {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    const dueMs = delayMs ?? Math.max(5_000, (s.expires_at - REFRESH_LEAD_SECONDS) * 1000 - Date.now());
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      if (this.cached !== s) return; // superseded by a newer session or a sign-out
+      this.refresh(s).catch(() => this.scheduleRefresh(s, REFRESH_RETRY_MS));
+    }, dueMs);
+  }
+
   async signOut(): Promise<void> {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = undefined;
     this.cached = null;
     await this.secrets.delete(SESSION_KEY);
     this.onChange.fire();

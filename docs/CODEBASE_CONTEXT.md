@@ -16,12 +16,11 @@ Roadmap: `docs/CURSOR_PARITY.md` → Phase 3.
 - **Instrumentation** (`node/claude/claudeExplorationTracker.ts`): every completed Claude
   turn logs `exploration turnId=… beforeFirstEdit=N searches=M toolCalls=K edited=…` to
   the agent host log. Many turns with a high `beforeFirstEdit` is the signal for 3b (D).
-- **Known issue (blocks relying on client tools):** in the packaged app, a Claude turn that
-  calls any workbench client tool (`workspaceSymbols`, and the pre-existing `usages`) runs
-  the tool but then stalls. One cause is fixed here (a completion that beat the SDK's MCP
-  handler was dropped; now buffered, `claudeAgentSession.completeClientToolCall`); a second
-  run showed the workbench's `ChatToolCallComplete` never reaching the host. Until that is
-  fixed the overview does not steer the agent toward the symbol tool.
+- **Client tools on Claude no longer stall** (fixed after 3a): the workbench runs a client
+  tool and confirms it itself as soon as its input is complete, often before the Claude SDK
+  asks the host for permission. The late permission request is now answered directly when
+  the call is already running or done (`agentSideEffects._handleToolReady`), and a result that
+  beats the SDK's MCP handler is buffered (`claudeAgentSession.completeClientToolCall`).
 
 ## What works today (verified 2026-10-07, packaged app)
 

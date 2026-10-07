@@ -4864,6 +4864,107 @@ suite('AgentSideEffects', () => {
 				{ requestId: 'tc-orphan', approved: true },
 			], 'pending_confirmation without active turn should still be processed and auto-approved');
 		});
+
+		test('Celiador: a late pending_confirmation for a client tool the workbench is already running is approved without re-dispatching ready', async () => {
+			// Re-dispatching ChatToolCallReady here moved the call back to
+			// pending-confirmation, so the workbench dropped its in-flight result.
+			setupSession();
+			startTurn('turn-1');
+			disposables.add(sideEffects.registerProgressListener(agent));
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: {
+					type: ActionType.ChatToolCallStart, turnId: 'turn-1',
+					toolCallId: 'tc-running', toolName: 'workspaceSymbols', displayName: 'Workspace Symbols',
+					contributor: { kind: ToolCallContributorKind.Client, clientId: 'client-tools' },
+					_meta: { toolKind: undefined, language: undefined },
+				},
+			});
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: {
+					type: ActionType.ChatToolCallReady, turnId: 'turn-1',
+					toolCallId: 'tc-running', invocationMessage: 'Searching...', toolInput: '{}',
+					confirmed: ToolCallConfirmationReason.NotNeeded,
+				},
+			});
+
+			agent.fireProgress({
+				kind: 'pending_confirmation', chat: URI.parse(defaultChatUri),
+				state: {
+					status: ToolCallStatus.PendingConfirmation,
+					toolCallId: 'tc-running', toolName: 'workspaceSymbols', displayName: 'Workspace Symbols',
+					invocationMessage: 'Searching...', toolInput: '{}',
+					confirmationTitle: 'Run Workspace Symbols?', edits: undefined,
+				},
+				permissionKind: 'custom-tool', permissionPath: undefined,
+			});
+			await timeout(0);
+
+			const part = stateManager.getSessionState(defaultChatUri)?.activeTurn?.responseParts.find(rp => rp.kind === ResponsePartKind.ToolCall && rp.toolCall.toolCallId === 'tc-running');
+			assert.deepStrictEqual({
+				status: part?.kind === ResponsePartKind.ToolCall ? part.toolCall.status : undefined,
+				responses: agent.respondToPermissionCalls,
+			}, {
+				status: ToolCallStatus.Running,
+				responses: [{ requestId: 'tc-running', approved: true }],
+			});
+		});
+
+		test('Celiador: a stale pending_confirmation for an already-completed client tool still answers the provider', async () => {
+			// The workbench runs a client tool as soon as its input is complete, which
+			// can be before the provider (Claude) asks for permission. Dropping that
+			// late request without answering left the provider parked forever.
+			setupSession();
+			startTurn('turn-1');
+			disposables.add(sideEffects.registerProgressListener(agent));
+
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: {
+					type: ActionType.ChatToolCallStart, turnId: 'turn-1',
+					toolCallId: 'tc-client', toolName: 'workspaceSymbols', displayName: 'Workspace Symbols',
+					contributor: { kind: ToolCallContributorKind.Client, clientId: 'client-tools' },
+					_meta: { toolKind: undefined, language: undefined },
+				},
+			});
+			agent.fireProgress({
+				kind: 'action', resource: URI.parse(defaultChatUri),
+				action: {
+					type: ActionType.ChatToolCallReady, turnId: 'turn-1',
+					toolCallId: 'tc-client', invocationMessage: 'Searching...', toolInput: '{}',
+					confirmed: ToolCallConfirmationReason.NotNeeded,
+				},
+			});
+			// The workbench (the owning client) completes the call.
+			stateManager.dispatchClientAction(defaultChatUri, {
+				type: ActionType.ChatToolCallComplete, turnId: 'turn-1',
+				toolCallId: 'tc-client', result: { success: true, pastTenseMessage: 'Searched' },
+			}, { clientId: 'client-tools', clientSeq: 1 });
+			const completed = stateManager.getSessionState(defaultChatUri)?.activeTurn?.responseParts.find(rp => rp.kind === ResponsePartKind.ToolCall && rp.toolCall.toolCallId === 'tc-client');
+
+			agent.fireProgress({
+				kind: 'pending_confirmation', chat: URI.parse(defaultChatUri),
+				state: {
+					status: ToolCallStatus.PendingConfirmation,
+					toolCallId: 'tc-client', toolName: 'workspaceSymbols', displayName: 'Workspace Symbols',
+					invocationMessage: 'Searching...', toolInput: '{}',
+					confirmationTitle: undefined, edits: undefined,
+				},
+				permissionKind: 'custom-tool', permissionPath: undefined,
+			});
+
+			// The provider answer changes no state, so wait for the async handler rather than for a state change.
+			await timeout(0);
+			assert.deepStrictEqual({
+				status: completed?.kind === ResponsePartKind.ToolCall ? completed.toolCall.status : undefined,
+				responses: agent.respondToPermissionCalls,
+			}, {
+				status: ToolCallStatus.Completed,
+				responses: [{ requestId: 'tc-client', approved: true }],
+			});
+		});
 	});
 
 	// ---- ChatToolCallComplete routing -----------------------------------
