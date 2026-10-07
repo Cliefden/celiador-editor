@@ -13,6 +13,7 @@ import { IConfigurationService } from '../../../../../../platform/configuration/
 import { TestConfigurationService } from '../../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { IDefaultAccountService } from '../../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { AGENT_SDK_SETUP_DOWNLOAD_COMMAND_ID, AGENT_SDK_SETUP_GITHUB_SIGN_IN_COMMAND_ID, AGENT_SDK_SETUP_OPEN_DOCS_COMMAND_ID, AGENT_SDK_SETUP_RELOAD_COMMAND_ID, AGENT_SDK_SETUP_SIGN_IN_COMMAND_ID, AgentHostSdkSetupNotificationContribution, agentSdkSetupNotificationId, createAgentSdkSetupNotification, getAgentDisplayNames, getAgentSdkSetupState, getAgentSdkSetupStateToReport, hasAgentSdkSetupNotification, type IAgentSdkSetupStateInputs } from '../../../browser/agentSessions/agentHost/agentHostSdkSetupNotification.js';
 import { IAgentSdkSetupService, type AgentSdkSetupState } from '../../../../../services/agentHost/browser/agentSdkSetupService.js';
 import { ChatEntitlement, IChatEntitlementService } from '../../../../../services/chat/common/chatEntitlementService.js';
@@ -208,6 +209,20 @@ suite('Agent SDK setup banner', () => {
 			// change carries the name.
 			assert.strictEqual(createAgentSdkSetupNotification({ agent: 'some-future-agent', download: 'notDownloaded' }, '', 'downloadOffered'), undefined);
 		});
+
+		test('Celiador: a missing account offers only Celiador sign-in, while the download offer is unchanged', () => {
+			const noAccount = createAgentSdkSetupNotification({ ...claude, download: 'ready', signInProviderName: 'Anthropic' }, 'Claude', 'noAccount', false, 'Celiador');
+
+			assert.deepStrictEqual({
+				message: noAccount?.message,
+				commandIds: commandIds(noAccount?.actions ?? []),
+				download: createAgentSdkSetupNotification(claude, 'Claude', 'downloadOffered', false, 'Celiador'),
+			}, {
+				message: 'Sign in to Celiador to use Claude.',
+				commandIds: ['celiador.signIn'],
+				download: createAgentSdkSetupNotification(claude, 'Claude', 'downloadOffered'),
+			});
+		});
 	});
 
 	suite('model availability', () => {
@@ -259,6 +274,8 @@ suite('Agent SDK setup banner', () => {
 					override readonly onDidChange = Event.None;
 				}(),
 			});
+			// Celiador: these cases cover the upstream banner; the Celiador variant is tested in 'presentation'.
+			instantiationService.stub(IProductService, { nameShort: 'Code - OSS' });
 
 			setModels(initialSessionTypes);
 			store.add(instantiationService.createInstance(AgentHostSdkSetupNotificationContribution));

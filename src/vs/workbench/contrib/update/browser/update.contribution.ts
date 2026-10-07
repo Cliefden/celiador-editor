@@ -34,7 +34,12 @@ workbench.registerWorkbenchContribution(UpdateContribution, LifecyclePhase.Resto
 workbench.registerWorkbenchContribution(SwitchProductQualityContribution, LifecyclePhase.Restored);
 workbench.registerWorkbenchContribution(DefaultAccountUpdateContribution, LifecyclePhase.Eventually);
 workbench.registerWorkbenchContribution(UpdateTitleBarContribution, LifecyclePhase.Restored);
-workbench.registerWorkbenchContribution(PostUpdateWidgetContribution, LifecyclePhase.Restored);
+// Celiador: the post-update widget fetches its content from code.visualstudio.com
+// (getUpdateInfoUrl). Like the release notes action, only offer it when the product
+// publishes release notes, which Celiador does not (yet).
+if (product.releaseNotesUrl) {
+	workbench.registerWorkbenchContribution(PostUpdateWidgetContribution, LifecyclePhase.Restored);
+}
 
 // Release notes
 

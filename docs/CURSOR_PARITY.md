@@ -17,12 +17,28 @@ app**, not just the dev build; each phase ships independently.
 - Model picker shows **Celiador models only** (daemon catalog); drop Copilot/BYOK tabs.
 - Verify built-app E2E: install → sign in → SDK provisions → chat streams an answer.
 - **Exit:** sign in → ask → streamed answer with tool use, in `Celiador.app`.
+- **Status (2026-10-07):** sign in → ask → streamed answer verified in the packaged app
+  through the prod daemon gateway (`screenshots/smoke-signed-in-answer.png`). A turn
+  that uses tools is not yet verified.
 
 ## Phase 1 — First-run & chrome parity (cheap, high perceived value)
 - Replace the "Get started with VS Code" walkthrough with a Celiador one; sign-in-first.
 - Neutralize residual Microsoft/GitHub surfaces (GitHub auth/STT noise, Settings Sync
   to Microsoft, telemetry endpoints, Accounts menu, Open VSX only, stray GitHub icon).
 - Branding sweep: activity bar, command center, About dialog, default settings.
+- **Done (branch `celiador-phase1-first-run`):** sign-in-first Setup walkthrough
+  (`celiador.signedIn` context key from celiador-ai); dictation off by default (it pulled
+  a Microsoft Foundry model); Open VSX `resourceUrlTemplate`; dropped the Microsoft
+  `trustedExtensionAuthAccess` entry; Cliefden company/copyright in the app bundle;
+  agent UI strings (approvals hover, Local/Claude session descriptions, SDK setup banner
+  → "Sign in to Celiador", model-picker update hints); no post-update fetch from
+  code.visualstudio.com; no "Ask @vscode". Already off: Settings Sync, telemetry,
+  experiments. Kept by decision: the bundled GitHub Pull Requests extension.
+- **Remaining:** `defaultChatAgent` in product.json still points at Copilot endpoints
+  (called once any GitHub session exists); the `github` and `tunnel-forwarding`
+  built-ins; Copilot plan actions in the Command Palette; ~25 lower-visibility
+  "VS Code" strings (reload/restart prompts, MCP welcome, issue reporter, settings
+  descriptions); a Celiador `documentationUrl`.
 
 ## Phase 2 — Inline edit (Cmd-K) + inline diff review
 - Audit what `vs/sessions`/agentHost already exposes for inline edit; wire a keybinding

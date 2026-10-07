@@ -15,6 +15,7 @@ import { CommandsRegistry } from '../../../../../../platform/commands/common/com
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { IDefaultAccountService } from '../../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { ServicesAccessor } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
 import { IAgentSdkSetupService, type AgentSdkSetupState } from '../../../../../services/agentHost/browser/agentSdkSetupService.js';
 import { ChatEntitlement, IChatEntitlementService } from '../../../../../services/chat/common/chatEntitlementService.js';
@@ -155,6 +156,9 @@ export function getAgentDisplayNames(state: RootState | Error | undefined): Read
 
 const AGENT_SDK_SETUP_NOTIFICATION_ID_PREFIX = 'agentHost.sdkSetup.';
 
+/** Celiador: the celiador-ai extension's sign-in command. */
+const CELIADOR_SIGN_IN_COMMAND_ID = 'celiador.signIn';
+
 export function agentSdkSetupNotificationId(agent: string): string {
 	return `${AGENT_SDK_SETUP_NOTIFICATION_ID_PREFIX}${agent}`;
 }
@@ -184,7 +188,7 @@ export function hasAgentSdkSetupNotification(chatInputNotificationService: IChat
  * never tie the SDK to an account: it is the same SDK behind the Copilot proxy,
  * a subscription or a BYO key.
  */
-export function createAgentSdkSetupNotification(setup: IAgentSdkSetupInfo, displayName: string, state: AgentSdkSetupState | undefined, hasModels = false): IChatInputNotification | undefined {
+export function createAgentSdkSetupNotification(setup: IAgentSdkSetupInfo, displayName: string, state: AgentSdkSetupState | undefined, hasModels = false, celiadorProductName?: string): IChatInputNotification | undefined {
 	// Nothing to ask of a user who is already set up. An empty `displayName` means
 	// the host has not described this agent yet, and "Download the  Agent" is worse
 	// than none; the next root-state change is moments away.
@@ -213,6 +217,22 @@ export function createAgentSdkSetupNotification(setup: IAgentSdkSetupInfo, displ
 				? localize('agentHost.sdkSetup.downloadDescription.withModels', "Click Download or send a message to download the {0} Agent SDK.", displayName)
 				: localize('agentHost.sdkSetup.downloadDescription', "To use the {0} Agent, we need to download the {0} Agent SDK.", displayName),
 			actions: [action(localize('agentHost.sdkSetup.downloadAction', "Download"), AGENT_SDK_SETUP_DOWNLOAD_COMMAND_ID)],
+		};
+	}
+	// Celiador: the agent runs on the user's Celiador plan through the daemon, so
+	// the only route to offer is a Celiador sign-in (not GitHub Copilot or a
+	// third-party subscription).
+	if (celiadorProductName) {
+		return {
+			...base,
+			message: localize('agentHost.sdkSetup.celiador.noAccount', "Sign in to {0} to use {1}.", celiadorProductName, displayName),
+			description: localize('agentHost.sdkSetup.celiador.noAccountDescription', "The {0} agent runs on your {1} plan, so there are no API keys to set up.", displayName, celiadorProductName),
+			actions: [{
+				kind: ChatInputNotificationActionKind.Command,
+				label: localize('agentHost.sdkSetup.celiador.signInAction', "Sign In to {0}", celiadorProductName),
+				commandId: CELIADOR_SIGN_IN_COMMAND_ID,
+				keepOpen: true,
+			}],
 		};
 	}
 	const actions: IChatInputNotificationAction[] = [];
@@ -288,6 +308,7 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IChatEntitlementService private readonly _chatEntitlementService: IChatEntitlementService,
 		@IAgentHostService private readonly _agentHostService: IAgentHostService,
+		@IProductService private readonly _productService: IProductService,
 	) {
 		super();
 		this._register(Event.any(
@@ -341,7 +362,8 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 				this._lastReported.set(setup.agent, toReport);
 				this._agentSdkSetupService.reportSetupState(setup.agent, toReport);
 			}
-			const notification = createAgentSdkSetupNotification(setup, displayName, state, hasModels);
+			const celiadorProductName = this._productService.nameShort !== 'Code - OSS' ? this._productService.nameShort : undefined;
+			const notification = createAgentSdkSetupNotification(setup, displayName, state, hasModels, celiadorProductName);
 			if (!notification) {
 				continue;
 			}
