@@ -1,6 +1,7 @@
 # Phase 3 — Codebase context: design proposal
 
-Status: **proposal, needs a decision** (see "Decisions needed" at the end).
+Status: **decided 2026-10-07 — option A first.** No index for now; revisit D if the
+exploratory-search signal shows up. (Original open questions kept at the end.)
 Roadmap: `docs/CURSOR_PARITY.md` → Phase 3.
 
 ## What works today (verified 2026-10-07, packaged app)
