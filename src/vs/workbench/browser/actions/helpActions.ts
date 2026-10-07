@@ -355,15 +355,21 @@ class AskVSCodeCopilot extends Action2 {
 	}
 }
 
-MenuRegistry.appendMenuItem(MenuId.MenubarHelpMenu, {
-	command: {
-		id: AskVSCodeCopilot.ID,
-		title: localize2('askVScode', 'Ask @vscode'),
-	},
-	order: 7,
-	group: '1_welcome',
-	when: ContextKeyExpr.and(ContextKeyExpr.equals('chatSetupHidden', false), ContextKeyExpr.equals('chatSetupDisabledInWorkspace', false), IsSessionsWindowContext.negate())
-});
+// Celiador: there is no @vscode participant (it belongs to the Copilot Chat
+// extension), so "Ask @vscode" is only offered in Code - OSS.
+const isCodeOss = product.nameShort === 'Code - OSS';
+
+if (isCodeOss) {
+	MenuRegistry.appendMenuItem(MenuId.MenubarHelpMenu, {
+		command: {
+			id: AskVSCodeCopilot.ID,
+			title: localize2('askVScode', 'Ask @vscode'),
+		},
+		order: 7,
+		group: '1_welcome',
+		when: ContextKeyExpr.and(ContextKeyExpr.equals('chatSetupHidden', false), ContextKeyExpr.equals('chatSetupDisabledInWorkspace', false), IsSessionsWindowContext.negate())
+	});
+}
 
 // --- Actions Registration
 
@@ -405,4 +411,6 @@ if (OpenPrivacyStatementUrlAction.AVAILABLE) {
 
 registerAction2(GetStartedWithAccessibilityFeatures);
 
-registerAction2(AskVSCodeCopilot);
+if (isCodeOss) {
+	registerAction2(AskVSCodeCopilot);
+}

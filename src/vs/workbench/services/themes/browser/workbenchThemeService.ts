@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as nls from '../../../../nls.js';
+import product from '../../../../platform/product/common/product.js';
 import * as types from '../../../../base/common/types.js';
 import { IExtensionService } from '../../extensions/common/extensions.js';
 import { IWorkbenchThemeService, IWorkbenchColorTheme, IWorkbenchFileIconTheme, ExtensionData, ThemeSettings, IWorkbenchProductIconTheme, ThemeSettingTarget, ThemeSettingDefaults, COLOR_THEME_DARK_INITIAL_COLORS, COLOR_THEME_LIGHT_INITIAL_COLORS, migrateThemeSettingsId } from '../common/workbenchThemeService.js';
@@ -280,7 +281,7 @@ export class WorkbenchThemeService extends Disposable implements IWorkbenchTheme
 		const keepTheme = await new Promise(resolve => {
 			this.notificationService.prompt(
 				Severity.Info,
-				nls.localize({ key: 'themeUpdatedNotification', comment: ['{0} is the name of the new default theme'] }, "VS Code has a new default theme: '{0}'.", this.getColorTheme().label),
+				nls.localize({ key: 'themeUpdatedNotification', comment: ['{0} is the name of the new default theme'] }, "{1} has a new default theme: '{0}'.", this.getColorTheme().label, product.nameShort), // Celiador: product name
 				[
 					toAction({
 						id: 'themeUpdated.tryItOut',

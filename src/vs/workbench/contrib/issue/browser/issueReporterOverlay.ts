@@ -259,7 +259,7 @@ export class IssueReporterOverlay {
 		heading.textContent = localize('screenshotsHeading', "Add attachments for better context");
 
 		const subtitle = append(page, $('p.wizard-subtitle'));
-		subtitle.textContent = localize('screenshotsSubtitle', "You can add up to {0} screenshots or videos. Navigate VS Code and choose when to capture.", MAX_ATTACHMENTS);
+		subtitle.textContent = localize('screenshotsSubtitle', "You can add up to {0} screenshots or videos. Navigate {1} and choose when to capture.", MAX_ATTACHMENTS, product.nameShort);
 
 		const captureShortcut = this.resolveKeybinding?.('workbench.action.issueReporter.captureScreenshot');
 		const recordShortcut = this.recordingSupported ? this.resolveKeybinding?.('workbench.action.issueReporter.toggleRecording') : undefined;
@@ -756,7 +756,7 @@ export class IssueReporterOverlay {
 		return [
 			{ label: product.nameLong || localize('vscode', "Celiador"), value: IssueSource.VSCode },
 			{ label: localize('agentsWindow', "Agents Window"), value: IssueSource.AgentsWindow },
-			{ label: localize('extensionSource', "A VS Code extension"), value: IssueSource.Extension },
+			{ label: localize('extensionSource', "A {0} extension", product.nameShort), value: IssueSource.Extension },
 			{ label: localize('marketplace', "Extensions Marketplace"), value: IssueSource.Marketplace },
 		];
 	}
@@ -1066,7 +1066,7 @@ export class IssueReporterOverlay {
 			case IssueSource.AgentsWindow:
 				return localize('agentsWindow', "Agents Window");
 			case IssueSource.Extension:
-				return this.selectedExtension?.displayName || this.selectedExtension?.name || localize('extensionSource', "A VS Code extension");
+				return this.selectedExtension?.displayName || this.selectedExtension?.name || localize('extensionSource', "A {0} extension", product.nameShort);
 			case IssueSource.Marketplace:
 				return localize('marketplace', "Extensions Marketplace");
 			case IssueSource.Unknown:

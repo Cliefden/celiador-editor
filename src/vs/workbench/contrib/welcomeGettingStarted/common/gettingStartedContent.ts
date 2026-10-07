@@ -222,6 +222,10 @@ export const startEntries: GettingStartedStartEntryContent = [
 
 const Button = (title: string, href: string) => `[${title}](${href})`;
 
+// Celiador: sign-in-first onboarding. `celiador.signedIn` is set by the celiador-ai
+// extension's auth provider; `celiador.signIn` is its sign-in command.
+const CeliadorSignedInContext = 'celiador.signedIn';
+
 export const walkthroughs: GettingStartedWalkthroughContent = [
 	{
 		id: 'Setup',
@@ -235,6 +239,28 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
 		content: {
 			type: 'steps',
 			steps: [
+				{
+					id: 'celiadorSignIn',
+					title: localize('gettingStarted.celiadorSignIn.title', "Sign in to Celiador"),
+					description: localize('gettingStarted.celiadorSignIn.description.interpolated', "Your Celiador account powers the agent. There are no API keys to set up, and your plan's included usage applies.\n{0}", Button(localize('gettingStarted.celiadorSignIn.button', "Sign In to Celiador"), 'command:celiador.signIn')),
+					when: `!${CeliadorSignedInContext}`,
+					completionEvents: [`onContext:${CeliadorSignedInContext}`],
+					media: { type: 'markdown', path: 'empty' }
+				},
+				{
+					id: 'celiadorAskAgent',
+					title: localize('gettingStarted.celiadorAskAgent.title', "Ask the agent"),
+					description: localize('gettingStarted.celiadorAskAgent.description.interpolated', "Describe what you want in plain words. The agent reads and edits the files in your workspace, and you review every change before it lands.\n{0}", Button(localize('gettingStarted.celiadorAskAgent.button', "Open Chat"), 'command:workbench.action.chat.open')),
+					completionEvents: ['onCommand:workbench.action.chat.open'],
+					media: { type: 'markdown', path: 'empty' }
+				},
+				{
+					id: 'celiadorAgentsWindow',
+					title: localize('gettingStarted.celiadorAgentsWindow.title', "Run agents side by side"),
+					description: localize('gettingStarted.celiadorAgentsWindow.description.interpolated', "The Agents window runs several agent sessions in parallel and lets you follow and steer them, including from the Celiador iPhone app.\n{0}", Button(localize('gettingStarted.celiadorAgentsWindow.button', "Open Agents Window"), 'command:workbench.action.openWorkspaceInAgentsWindow')),
+					completionEvents: ['onCommand:workbench.action.openWorkspaceInAgentsWindow'],
+					media: { type: 'markdown', path: 'empty' }
+				},
 				{
 					id: 'pickColorTheme',
 					title: localize('gettingStarted.pickColor.title', "Choose your theme"),
@@ -454,7 +480,7 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
 				{
 					id: 'settingsAndSync',
 					title: localize('gettingStarted.settings.title', "Tune your settings"),
-					description: localize('gettingStarted.settingsAndSync.description.interpolated', "Customize every aspect of Celiador and [sync](command:workbench.userDataSync.actions.turnOn) customizations across devices.\n{0}", Button(localize('tweakSettings', "Open Settings"), 'command:toSide:workbench.action.openSettings')),
+					description: localize('gettingStarted.settingsAndSync.description.interpolated', "Customize every aspect of Celiador.\n{0}", Button(localize('tweakSettings', "Open Settings"), 'command:toSide:workbench.action.openSettings')),
 					when: 'workspacePlatform != \'webworker\' && syncStatus != uninitialized',
 					completionEvents: ['onEvent:sync-enabled'],
 					media: {
@@ -518,7 +544,7 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
 				{
 					id: 'installGit',
 					title: localize('gettingStarted.installGit.title', "Install Git"),
-					description: localize({ key: 'gettingStarted.installGit.description.interpolated', comment: ['The placeholders are command link items should not be translated'] }, "Install Git to track changes in your projects.\n{0}\n{1}Reload window{2} after installation to complete Git setup.", Button(localize('installGit', "Install Git"), 'https://aka.ms/vscode-install-git'), '[', '](command:workbench.action.reloadWindow)'),
+					description: localize({ key: 'gettingStarted.installGit.description.interpolated', comment: ['The placeholders are command link items should not be translated'] }, "Install Git to track changes in your projects.\n{0}\n{1}Reload window{2} after installation to complete Git setup.", Button(localize('installGit', "Install Git"), 'https://git-scm.com/downloads'), '[', '](command:workbench.action.reloadWindow)'),
 					when: 'git.missing',
 					media: {
 						type: 'svg', altText: 'Install Git.', path: 'git.svg',

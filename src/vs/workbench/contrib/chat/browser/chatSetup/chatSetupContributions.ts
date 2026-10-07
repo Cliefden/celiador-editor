@@ -231,7 +231,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					id: CHAT_SETUP_ACTION_ID,
 					title: ChatSetupTriggerAction.CHAT_SETUP_ACTION_LABEL,
 					category: CHAT_CATEGORY,
-					f1: true,
+					f1: product.nameShort === 'Code - OSS', // Celiador: Copilot setup is a no-op here; keep it out of the Command Palette.
 					precondition: ContextKeyExpr.or(
 						ChatContextKeys.Setup.hidden,
 						ChatContextKeys.Setup.disabledInWorkspace,
@@ -457,7 +457,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					id: 'workbench.action.chat.upgradePlan',
 					title: localize2('managePlan', "Upgrade to GitHub Copilot Pro"),
 					category: localize2('chat.category', 'Chat'),
-					f1: true,
+					f1: product.nameShort === 'Code - OSS', // Celiador: no Copilot plans.
 					precondition: ContextKeyExpr.and(
 						ChatContextKeys.Setup.hidden.negate(),
 						ChatContextKeys.Setup.disabledInWorkspace.negate(),
@@ -522,7 +522,7 @@ export class ChatSetupContribution extends Disposable implements IWorkbenchContr
 					id: 'workbench.action.chat.manageAdditionalSpend',
 					title: localize2('manageAdditionalSpend', "Manage GitHub Copilot Budget"),
 					category: localize2('chat.category', 'Chat'),
-					f1: true,
+					f1: product.nameShort === 'Code - OSS', // Celiador: no Copilot plans.
 					precondition: ContextKeyExpr.and(
 						ChatContextKeys.Setup.hidden.negate(),
 						ChatContextKeys.Setup.disabledInWorkspace.negate(),

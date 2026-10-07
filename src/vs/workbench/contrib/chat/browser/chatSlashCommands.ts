@@ -16,6 +16,7 @@ import { ICommandService } from '../../../../platform/commands/common/commands.j
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
+import product from '../../../../platform/product/common/product.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IChatAgentService } from '../common/participants/chatAgents.js';
 import { ChatContextKeys } from '../common/actions/chatContextKeys.js';
@@ -68,7 +69,7 @@ export class ChatSlashCommandsContribution extends Disposable {
 
 		this._store.add(slashCommandService.registerSlashCommand({
 			command: 'vscode-pet',
-			detail: nls.localize('vscodePet', "Toggle an interactive VS Code pet (Experimental)"),
+			detail: nls.localize('vscodePet', "Toggle an interactive {0} pet (Experimental)", product.nameShort), // Celiador: product name
 			sortText: 'z3_vscodePet',
 			executeImmediately: true,
 			silent: true,

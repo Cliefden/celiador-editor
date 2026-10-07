@@ -7,6 +7,7 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize } from '../../../../../nls.js';
+import product from '../../../../../platform/product/common/product.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { browserChatToolReferenceNames } from '../../../../../platform/browserView/common/browserChatToolReferenceNames.js';
 import { IAICustomizationWorkspaceService } from '../../common/aiCustomizationWorkspaceService.js';
@@ -81,8 +82,8 @@ export class ClientToolSetsContribution extends Disposable implements IWorkbench
 			id: 'vscode-general',
 			referenceName: 'vscodeGeneral',
 			icon: Codicon.vscode,
-			description: localize('clientToolSet.vscode.description', "VS Code"),
-			detail: localize('clientToolSet.vscode.detail', "Navigate code, manage extensions, and run built-in VS Code commands."),
+			description: product.nameShort, // Celiador: product name
+			detail: localize('clientToolSet.vscode.detail', "Navigate code, manage extensions, and run built-in {0} commands.", product.nameShort), // Celiador: product name
 			members: [
 				...(workspaceService.isSessionsWindow ? [] : ['runTests', 'testFailure', 'rename', 'usages']),
 				'toolSearch',

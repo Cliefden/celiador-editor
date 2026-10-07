@@ -18,6 +18,8 @@ import type { Auth } from "./auth";
 export const CELIADOR_AUTH_PROVIDER_ID = "celiador";
 const CELIADOR_AUTH_PROVIDER_LABEL = "Celiador";
 const SESSION_ID = "celiador-supabase-session";
+/** Context key for `when` clauses (e.g. the Get Started walkthrough's sign-in step). */
+const SIGNED_IN_CONTEXT_KEY = "celiador.signedIn";
 
 export class CeliadorAuthProvider implements vscode.AuthenticationProvider, vscode.Disposable {
 	private readonly _onDidChangeSessions = new vscode.EventEmitter<vscode.AuthenticationProviderAuthenticationSessionsChangeEvent>();
@@ -31,12 +33,18 @@ export class CeliadorAuthProvider implements vscode.AuthenticationProvider, vsco
 		// Translate the extension's own sign-in/out/refresh into provider session
 		// change events so the workbench re-resolves and re-forwards the token.
 		this._sub = this.auth.onDidChange(() => { void this._fireChange(); });
+		void this.auth.isSignedIn().then((signedIn) => this._setSignedInContext(signedIn));
+	}
+
+	private _setSignedInContext(signedIn: boolean): void {
+		void vscode.commands.executeCommand("setContext", SIGNED_IN_CONTEXT_KEY, signedIn);
 	}
 
 	private async _fireChange(): Promise<void> {
 		const previous = this._lastSession;
 		const sessions = await this.getSessions();
 		const current = sessions[0];
+		this._setSignedInContext(!!current);
 		if (current && !previous) {
 			this._onDidChangeSessions.fire({ added: [current], removed: [], changed: [] });
 		} else if (!current && previous) {

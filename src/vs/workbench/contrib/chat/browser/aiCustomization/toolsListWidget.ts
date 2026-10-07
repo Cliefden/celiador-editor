@@ -26,6 +26,7 @@ import { ScrollbarVisibility } from '../../../../../base/common/scrollable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
+import product from '../../../../../platform/product/common/product.js';
 import { ExtensionIdentifier } from '../../../../../platform/extensions/common/extensions.js';
 import { IContextMenuService, IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
@@ -838,7 +839,7 @@ export class ToolsListWidget extends Disposable {
 		const installed = model.filter(vm => vm.toolSet.source.type === 'extension');
 		this._renderToolSection(
 			localize('builtInToolsSection', "Built-in Tools"),
-			localize('builtInToolsSectionDescription', "Tools provided by the active agent and VS Code."),
+			localize('builtInToolsSectionDescription', "Tools provided by the active agent and {0}.", product.nameShort), // Celiador: product name
 			localize('builtInToolsSectionEmpty', "No built-in tool sets are available."),
 			builtIn,
 			query,

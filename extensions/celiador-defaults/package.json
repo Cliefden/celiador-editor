@@ -13,7 +13,8 @@
       "chat.disableAIFeatures": false,
       "chat.agentHost.claudeAgent.enabled": true,
       "chat.agentHost.codexAgent.enabled": false,
-      "chat.inlineChat.agentHost.enabled": true
+      "chat.inlineChat.agentHost.enabled": true,
+      "dictation.enabled": false
     }
   },
   "repository": {
