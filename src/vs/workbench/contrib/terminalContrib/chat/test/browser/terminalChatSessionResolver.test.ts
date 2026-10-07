@@ -50,18 +50,22 @@ class TestChatSessionsService extends mock<IChatSessionsService>() {
 	contribution: ResolvedChatSessionsExtensionPoint | undefined = terminalContribution;
 	item: IChatSessionItem | undefined = agentHostItem;
 	error: Error | undefined;
+	/** Additional contributions, by type (Celiador: e.g. the Claude agent host). */
+	readonly extraContributions = new Map<string, ResolvedChatSessionsExtensionPoint>();
 	contributionLookups = 0;
 	creationCalls = 0;
 	request: IChatNewSessionRequest | undefined;
+	createdSessionType: string | undefined;
 
-	override getChatSessionContribution(): ResolvedChatSessionsExtensionPoint | undefined {
+	override getChatSessionContribution(sessionType: string): ResolvedChatSessionsExtensionPoint | undefined {
 		this.contributionLookups++;
-		return this.contribution;
+		return this.extraContributions.get(sessionType) ?? (this.contribution?.type === sessionType ? this.contribution : undefined);
 	}
 
-	override async createNewChatSessionItem(_chatSessionType: string, request: IChatNewSessionRequest): Promise<IChatSessionItem | undefined> {
+	override async createNewChatSessionItem(chatSessionType: string, request: IChatNewSessionRequest): Promise<IChatSessionItem | undefined> {
 		this.creationCalls++;
 		this.request = request;
+		this.createdSessionType = chatSessionType;
 		if (this.error) {
 			throw this.error;
 		}
@@ -136,6 +140,18 @@ suite('TerminalChatSessionResolver', () => {
 			creationCalls: 1,
 			agentHostAcquisitions: 1,
 			localSessionStarts: 0,
+		});
+	});
+
+	test('Celiador: prefers the Claude Agent Host session when it supports the terminal location', async () => {
+		chatSessionsService.extraContributions.set(SessionType.AgentHostClaude, { ...terminalContribution, type: SessionType.AgentHostClaude });
+		chatService.agentHostReference = new TestModelReference();
+
+		const result = await resolver.resolve(CancellationToken.None, terminalShellType, terminalOperatingSystem);
+
+		assert.deepStrictEqual({ created: chatSessionsService.createdSessionType, lockToAgent: result?.lockToAgent?.type }, {
+			created: SessionType.AgentHostClaude,
+			lockToAgent: SessionType.AgentHostClaude,
 		});
 	});
 

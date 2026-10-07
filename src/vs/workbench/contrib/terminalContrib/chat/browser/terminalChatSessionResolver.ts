@@ -71,10 +71,16 @@ export class TerminalChatSessionResolver implements ITerminalChatSessionResolver
 		const meta = getTerminalChatSessionMeta(shellType, os);
 		let modelRef: IChatModelReference | undefined;
 		const agentHostEnabled = this._configurationService.getValue<boolean>(ChatConfiguration.TerminalAgentHostEnabled) === true;
-		const contribution = agentHostEnabled ? this._chatSessionsService.getChatSessionContribution(SessionType.AgentHostCopilot) : undefined;
-		if (contribution?.locations?.includes(ChatAgentLocation.Terminal)) {
+		// Celiador: the first Agent Host type offering the terminal location, Claude
+		// before Copilot CLI (upstream hardcoded Copilot CLI only).
+		const sessionType = agentHostEnabled
+			? [SessionType.AgentHostClaude, SessionType.AgentHostCopilot].find(type =>
+				this._chatSessionsService.getChatSessionContribution(type)?.locations?.includes(ChatAgentLocation.Terminal) === true)
+			: undefined;
+		const contribution = sessionType ? this._chatSessionsService.getChatSessionContribution(sessionType) : undefined;
+		if (sessionType) {
 			try {
-				const item = await this._chatSessionsService.createNewChatSessionItem(SessionType.AgentHostCopilot, {
+				const item = await this._chatSessionsService.createNewChatSessionItem(sessionType, {
 					prompt: '',
 					isEphemeral: true,
 					_meta: meta,

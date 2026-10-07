@@ -291,10 +291,11 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 			displayName: agent.displayName,
 			description: agent.description,
 			// Celiador: the Claude provider (Celiador's agent) also serves editor inline
-			// chat (Cmd+I); its edits are reviewed as inline hunks like Copilot CLI's.
-			locations: agent.provider === 'copilotcli'
+			// chat (Cmd+I, edits reviewed as inline hunks) and terminal inline chat,
+			// like Copilot CLI.
+			locations: agent.provider === 'copilotcli' || agent.provider === 'claude'
 				? [ChatAgentLocation.Chat, ChatAgentLocation.Terminal, ChatAgentLocation.EditorInline]
-				: agent.provider === 'claude' ? [ChatAgentLocation.Chat, ChatAgentLocation.EditorInline] : undefined,
+				: undefined,
 			customAgentTarget: this._isSessionsWindow ? undefined : Target.GitHubCopilot,
 			canDelegate: true,
 			requiresCustomModels: true,

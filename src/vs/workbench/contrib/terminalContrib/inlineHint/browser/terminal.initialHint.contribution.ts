@@ -32,6 +32,10 @@ import './media/terminalInitialHint.css';
 import { TerminalSuggestCommandId } from '../../suggest/common/terminal.suggest.js';
 import { TerminalSuggestSettingId } from '../../suggest/common/terminalSuggestConfiguration.js';
 import { IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
+import product from '../../../../../platform/product/common/product.js';
+
+/** Celiador: `TerminalChatCommandId.Start` (terminalContrib/chat), referenced by id to avoid a cross-contrib import. */
+const CELIADOR_TERMINAL_CHAT_START_COMMAND_ID = 'workbench.action.terminal.chat.start';
 
 const $ = dom.$;
 
@@ -270,8 +274,27 @@ class TerminalInitialHintWidget extends Disposable {
 
 		const aiFeaturesHidden = this._chatEntitlementService.sentiment.hidden;
 
+		// Celiador: there is no Copilot CLI; point at terminal inline chat (the Celiador
+		// agent) instead, using its actual keybinding.
+		const celiadorChatKeybinding = !aiFeaturesHidden && product.nameShort !== 'Code - OSS'
+			? this._keybindingService.lookupKeybinding(CELIADOR_TERMINAL_CHAT_START_COMMAND_ID)?.getLabel()
+			: undefined;
+		if (celiadorChatKeybinding) {
+			const celiadorChatHint = localize({
+				key: 'celiadorTerminalChatHint',
+				comment: ['Preserve double-square brackets and their order', '{0} is a keybinding, {1} is the product name']
+			}, "Press [[{0}]] to ask the {1} agent for a command.", celiadorChatKeybinding, product.nameShort);
+			hintElement.appendChild(renderFormattedText(celiadorChatHint, {
+				actionHandler: {
+					callback: () => { this._commandService.executeCommand(CELIADOR_TERMINAL_CHAT_START_COMMAND_ID); },
+					disposables: this._toDispose
+				}
+			}));
+			ariaLabelParts.push(localize('celiadorTerminalChatHintAriaLabel', "Press {0} to ask the {1} agent for a command.", celiadorChatKeybinding, product.nameShort));
+		}
+
 		// Copilot CLI hint (only shown when AI features are enabled)
-		if (!aiFeaturesHidden) {
+		if (!aiFeaturesHidden && product.nameShort === 'Code - OSS') {
 			const handleCopilotCliClick = () => {
 				this._telemetryService.publicLog2<WorkbenchActionExecutedEvent, WorkbenchActionExecutedClassification>('workbenchActionExecuted', {
 					id: 'terminalCopilotCli.hintAction',
