@@ -2228,6 +2228,43 @@ suite('ClaudeAgent', () => {
 		assert.deepStrictEqual(agent.models.get().map(m => m.id), [toClaudeModelSelectionId(CLAUDE_PROVIDER_COPILOT, CLAUDE_SONNET.id)]);
 	});
 
+	test('Celiador: a merged refresh in flight when the daemon token arrives does not blank the daemon catalog', async () => {
+		// A GitHub sign-in starts a merged refresh that hangs; the Celiador daemon
+		// token then publishes the daemon model. The late merged write must be dropped.
+		const proxy = new FakeClaudeProxyService();
+		const api = new FakeCopilotApiService();
+		const ghModels = new DeferredPromise<CCAModel[]>();
+		api.models = () => ghModels.p;
+
+		const services = new ServiceCollection(
+			[ILogService, new NullLogService()],
+			...createTestAgentStateServices(disposables),
+			[ICopilotApiService, api],
+			[IClaudeProxyService, proxy],
+			[ISessionDataService, createNullSessionDataService()],
+			[IClaudeAgentSdkService, new FakeClaudeAgentSdkService()],
+			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
+			[IAgentPluginManager, new FakeAgentPluginManager()],
+			[IProductService, FakeProductService],
+			[IAgentHostGitHubEndpointService, createTestGitHubEndpointService()],
+		);
+		const instantiationService: IInstantiationService = disposables.add(new InstantiationService(services));
+		const agent = disposables.add(instantiationService.createInstance(ClaudeAgent));
+
+		await agent.authenticate('https://api.github.com', 'gh-token');
+		await agent.authenticate('https://celiador.ai/api/anthropic', 'supabase-token');
+		await tick();
+		const afterDaemon = agent.models.get().map(m => m.name);
+
+		ghModels.complete([]); // an empty merged catalog, as when the proxy fetch yields nothing
+		await tick();
+
+		assert.deepStrictEqual({ afterDaemon, afterMerged: agent.models.get().map(m => m.name) }, {
+			afterDaemon: ['Claude (Celiador)'],
+			afterMerged: ['Claude (Celiador)'],
+		});
+	});
+
 	// #region Phase 5 — session lifecycle
 
 	test('createChat (non-fork) mints a claude:/<uuid> backing with provisional: true; no DB or SDK contact', async () => {

@@ -13,6 +13,9 @@
     "Other"
   ],
   "main": "./out/extension.js",
+  "enabledApiProposals": [
+    "authIssuers"
+  ],
   "activationEvents": [
     "onStartupFinished"
   ],

@@ -110,14 +110,21 @@ export class CeliadorAuthProvider implements vscode.AuthenticationProvider, vsco
 	}
 }
 
-/** Register the Celiador authentication provider; returns a disposable. */
-export function registerCeliadorAuthProvider(auth: Auth): vscode.Disposable {
+/**
+ * Register the Celiador authentication provider; returns a disposable.
+ *
+ * `supportedAuthorizationServers` is what lets the workbench match this provider
+ * to the agent's protected resource (whose authorization server is the daemon
+ * URL). The `authorizationServerGlobs` in package.json only drive activation of a
+ * not-yet-registered provider; once registered, matching uses this list alone.
+ */
+export function registerCeliadorAuthProvider(auth: Auth, daemonUrl: string): vscode.Disposable {
 	const provider = new CeliadorAuthProvider(auth);
 	const registration = vscode.authentication.registerAuthenticationProvider(
 		CELIADOR_AUTH_PROVIDER_ID,
 		CELIADOR_AUTH_PROVIDER_LABEL,
 		provider,
-		{ supportsMultipleAccounts: false },
+		{ supportsMultipleAccounts: false, supportedAuthorizationServers: [vscode.Uri.parse(daemonUrl)] },
 	);
 	return vscode.Disposable.from(registration, provider);
 }

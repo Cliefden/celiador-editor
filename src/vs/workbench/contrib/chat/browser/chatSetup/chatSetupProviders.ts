@@ -188,7 +188,8 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 	private static readonly CELIADOR_AGENT_STARTING_MESSAGE = new MarkdownString(localize('celiadorAgentStarting', "The Celiador agent is still starting. Try again in a moment."));
 	private static readonly CELIADOR_AUTH_PROVIDER_ID = 'celiador';
 	private static readonly CELIADOR_SIGN_IN_COMMAND_ID = 'celiador.signIn';
-	private static readonly CELIADOR_OPEN_SESSION_COMMAND_ID = `workbench.action.chat.openNewSessionSidebar.${SessionType.AgentHostClaude}`;
+	// The agent host registers its session types programmatically, which only get the in-place action.
+	private static readonly CELIADOR_OPEN_SESSION_COMMAND_ID = `workbench.action.chat.openNewChatSessionInPlace.${SessionType.AgentHostClaude}`;
 
 	private static readonly CHAT_RETRY_COMMAND_ID = 'workbench.action.chat.retrySetup';
 	private static readonly CHAT_SHOW_OUTPUT_COMMAND_ID = 'workbench.action.chat.showOutput';
@@ -314,7 +315,7 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 			return {};
 		}
 
-		this.commandService.executeCommand(SetupAgent.CELIADOR_OPEN_SESSION_COMMAND_ID, {
+		this.commandService.executeCommand(SetupAgent.CELIADOR_OPEN_SESSION_COMMAND_ID, 'sidebar', {
 			prompt: request.message,
 			attachedContext: request.variables.variables
 		}).catch(error => this.logService.error(`[chat setup] Failed to hand off to the Celiador agent: ${toErrorMessage(error)}`));

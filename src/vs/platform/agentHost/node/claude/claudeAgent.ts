@@ -1009,6 +1009,11 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		if (this._githubToken !== tokenAtStart) {
 			return;
 		}
+		// Celiador: likewise if the daemon token arrived mid-refresh — the daemon
+		// refresh has already published its catalog, which this write would blank.
+		if (this._daemonToken) {
+			return;
+		}
 		const attempted = (tokenAtStart ? 1 : 0) + (canAttemptNative ? 1 : 0);
 		const failed = (proxyOutcome.status === 'rejected' ? 1 : 0) + (nativeOutcome.status === 'rejected' ? 1 : 0);
 		if (attempted > 0 && failed === attempted) {
