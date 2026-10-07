@@ -57,10 +57,16 @@ app**, not just the dev build; each phase ships independently.
   (Claude first) and the Claude contribution declares `EditorInline`. Verified: Cmd+I →
   Claude (Celiador) edits only the target function, shown as inline hunks; Undo restores
   the buffer.
-- **Next:** Cmd-K (Cursor's binding) as an alias for inline chat; fallback when Cmd+I is
-  pressed before the agent host registers (currently hands off to the sidebar); multi-file
-  edits from inline open in a side group (upstream behaviour, unverified with Claude);
-  terminal inline chat (`terminalChatSessionResolver` has the same Copilot CLI hardcoding).
+- **Done, follow-ups:** terminal inline chat (⌘I in the terminal) runs on Claude too
+  (`terminalChatSessionResolver` Claude-first, Claude declares `Terminal`,
+  `chat.terminal.agentHost.enabled` on): suggests a command with Run/Insert, never
+  auto-runs. Inline chat that can't get an agent session answers in place instead of
+  jumping to the Chat view. Terminal hint "Type copilot to use Copilot CLI" replaced by
+  "Press ⌘I to ask the Celiador agent for a command".
+- **Decided:** inline edit stays on ⌘I; no Cursor-style ⌘K (it would displace VS Code's
+  ⌘K chords).
+- **Next:** multi-file edits from inline open in a side group (upstream behaviour,
+  unverified with Claude).
 
 ## Phase 3 — Codebase context (moat #1)
 - `@`-mentions: files, symbols, folders, git, docs, web.

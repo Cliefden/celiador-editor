@@ -186,6 +186,7 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 	// provider. These replace the GitHub Copilot setup flow for the Local chat.
 	private static readonly CELIADOR_SIGN_IN_MESSAGE = new MarkdownString(localize('celiadorSignInNeeded', "Sign in to Celiador to use Chat."));
 	private static readonly CELIADOR_AGENT_STARTING_MESSAGE = new MarkdownString(localize('celiadorAgentStarting', "The Celiador agent is still starting. Try again in a moment."));
+	private static readonly CELIADOR_INLINE_RETRY_MESSAGE = new MarkdownString(localize('celiadorInlineRetry', "The Celiador agent wasn't ready when this inline chat opened. Close it and press the shortcut again. Inline chat works in saved files; for anything else, use the Chat view."));
 	private static readonly CELIADOR_AUTH_PROVIDER_ID = 'celiador';
 	private static readonly CELIADOR_SIGN_IN_COMMAND_ID = 'celiador.signIn';
 	// The agent host registers its session types programmatically, which only get the in-place action.
@@ -312,6 +313,15 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 
 		if (!CommandsRegistry.getCommand(SetupAgent.CELIADOR_OPEN_SESSION_COMMAND_ID)) {
 			progress({ kind: 'markdownContent', content: SetupAgent.CELIADOR_AGENT_STARTING_MESSAGE });
+			return {};
+		}
+
+		// Inline (editor/terminal) chat reaches this placeholder only when it could not
+		// get an agent session of its own, e.g. the agent host registered after the
+		// widget opened, or an unsaved buffer. Answer in place rather than jumping to
+		// the Chat view: reopening the inline chat now picks up the Celiador agent.
+		if (request.location !== ChatAgentLocation.Chat) {
+			progress({ kind: 'markdownContent', content: SetupAgent.CELIADOR_INLINE_RETRY_MESSAGE });
 			return {};
 		}
 

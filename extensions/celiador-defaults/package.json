@@ -14,6 +14,7 @@
       "chat.agentHost.claudeAgent.enabled": true,
       "chat.agentHost.codexAgent.enabled": false,
       "chat.inlineChat.agentHost.enabled": true,
+      "chat.terminal.agentHost.enabled": true,
       "dictation.enabled": false
     }
   },
