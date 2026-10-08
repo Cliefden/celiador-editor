@@ -31,6 +31,46 @@ export interface ChatMessage {
   created_at: string;
 }
 
+/** Today's agent usage counters (UTC day), as metered by the daemon's quota tracker. */
+export interface Usage {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Active per-user daily limits. A `0` means that limit is disabled (unlimited). */
+export interface Limits {
+  rpm: number;
+  concurrency: number;
+  dailyRequests: number;
+  dailyInput: number;
+  dailyOutput: number;
+}
+
+/** Dollar balance for the account (Stripe-backed; Phase 5 slice 2). Absent until billing lands. */
+export interface Balance {
+  plan: string;
+  planLabel: string;
+  includedUsd: number;
+  spentUsd: number;
+  topUpUsd: number;
+  remainingUsd: number;
+  period: string;
+}
+
+/** GET /api/me — signed-in account summary: identity, plan, usage vs. quota. */
+export interface Me {
+  userId: string;
+  email: string | null;
+  /** Billing plan, or null in token/none (self-host/dev) mode or before a profile row exists. */
+  plan: string | null;
+  usage: Usage;
+  limits: Limits;
+  /** ISO timestamp when the daily usage counters reset (next UTC midnight). */
+  resetsAt: string;
+  balance?: Balance;
+}
+
 export class DaemonApi {
   constructor(private readonly auth: Auth, private readonly getUrl: () => string) {}
 
@@ -71,5 +111,14 @@ export class DaemonApi {
 
   async deleteChat(id: string): Promise<void> {
     await this.call(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async getMe(): Promise<Me> {
+    return this.call<Me>("/api/me");
+  }
+
+  /** Permanently delete the signed-in account and all its data (DELETE /api/account). */
+  async deleteAccount(): Promise<void> {
+    await this.call("/api/account", { method: "DELETE" });
   }
 }

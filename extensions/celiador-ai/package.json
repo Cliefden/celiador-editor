@@ -76,6 +76,11 @@
         "command": "celiador.manageBilling",
         "title": "Celiador: Manage Billing",
         "category": "Celiador"
+      },
+      {
+        "command": "celiador.deleteAccount",
+        "title": "Celiador: Delete Account",
+        "category": "Celiador"
       }
     ],
     "viewsContainers": {

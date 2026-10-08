@@ -3,7 +3,7 @@ import { Auth } from "./auth";
 import { registerCeliadorAuthProvider } from "./authProvider";
 import { CeliadorChangesViewProvider } from "./changesView";
 import { CeliadorWelcomeViewProvider } from "./welcomeView";
-import { DaemonApi } from "./api";
+import { DaemonApi, type Me } from "./api";
 import { resolveDaemonUrl } from "./productConfig";
 
 // The agent itself is the native Agents Window (Claude Agent SDK), routed through the
@@ -20,23 +20,11 @@ function daemonUrl(): string {
   return resolveDaemonUrl();
 }
 
-interface Balance {
-  plan: string;
-  planLabel: string;
-  includedUsd: number;
-  spentUsd: number;
-  topUpUsd: number;
-  remainingUsd: number;
-  period: string;
-}
-
-/** GET /api/me — identity, plan and what is left. Undefined when signed out or unreachable. */
-async function fetchMe(): Promise<{ balance: Balance } | undefined> {
+/** GET /api/me — identity, plan, usage, and (once billing lands) balance. Undefined when signed out or unreachable. */
+async function fetchMe(api: DaemonApi): Promise<Me | undefined> {
   if (!auth || !(await auth.isSignedIn())) return undefined;
   try {
-    const res = await fetch(`${daemonUrl()}/api/me`, { headers: { Authorization: `Bearer ${await auth.getAccessToken()}` } });
-    if (!res.ok) return undefined;
-    return (await res.json()) as { balance: Balance };
+    return await api.getMe();
   } catch {
     return undefined;
   }
@@ -77,10 +65,14 @@ export function activate(context: vscode.ExtensionContext): void {
   console.log("[celiador-ai] activated");
   auth = new Auth(context.secrets);
 
+  // App data (profile + chat history + account summary) served by the daemon over the shared JWT.
+  const api = new DaemonApi(auth, () => daemonUrl());
+
   // Welcome/account pane — always visible so the signed-out state invites sign-in
-  // (the Agents Window needs a Celiador token) instead of silently waiting.
+  // (the Agents Window needs a Celiador token) instead of silently waiting; signed
+  // in, it shows plan + usage and account management.
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(CeliadorWelcomeViewProvider.viewId, new CeliadorWelcomeViewProvider(auth))
+    vscode.window.registerWebviewViewProvider(CeliadorWelcomeViewProvider.viewId, new CeliadorWelcomeViewProvider(auth, api))
   );
 
   // Git-review "Changes" view in the Celiador sidebar.
@@ -156,9 +148,6 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // App data (profile + chat history) served by the daemon over the shared JWT.
-  const api = new DaemonApi(auth, () => daemonUrl());
-
   context.subscriptions.push(
     vscode.commands.registerCommand("celiador.account", async () => {
       if (!auth || !(await auth.isSignedIn())) {
@@ -217,8 +206,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const balanceStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   balanceStatus.command = "celiador.manageBilling";
   const refreshBalance = async () => {
-    const me = await fetchMe();
-    if (!me) {
+    const me = await fetchMe(api);
+    // Balance is Stripe-backed (Phase 5 slice 2); until it lands the daemon omits it.
+    if (!me?.balance) {
       balanceStatus.hide();
       return;
     }
@@ -235,19 +225,43 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("celiador.manageBilling", async () => {
-      const me = await fetchMe();
+      const me = await fetchMe(api);
       const pick = await vscode.window.showQuickPick(
         [
           { label: "Add credits", id: "credits", detail: "One-off top-up — no subscription change" },
           { label: "Change plan", id: "plan", detail: "Upgrade, downgrade or cancel" },
           { label: "Refresh balance", id: "refresh" },
         ],
-        { placeHolder: me ? `${me.balance.planLabel} — $${me.balance.remainingUsd.toFixed(2)} left` : "Celiador billing" }
+        { placeHolder: me?.balance ? `${me.balance.planLabel} — $${me.balance.remainingUsd.toFixed(2)} left` : "Celiador billing" }
       );
       if (!pick) return;
       if (pick.id === "refresh") return void refreshBalance();
       if (pick.id === "plan") return void openBilling("portal", {});
-      return void openBilling("checkout", me?.balance.plan === "free" ? { plan: "builder" } : {});
+      return void openBilling("checkout", me?.balance?.plan === "free" ? { plan: "builder" } : {});
+    })
+  );
+
+  // Permanent account deletion (App Store 5.1.1(v)) — confirm, delete via the daemon, sign out.
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.deleteAccount", async () => {
+      if (!auth || !(await auth.isSignedIn())) {
+        void vscode.window.showInformationMessage("Not signed in.");
+        return;
+      }
+      const email = (await auth.currentEmail()) ?? "your account";
+      const confirm = await vscode.window.showWarningMessage(
+        `Permanently delete ${email}? This erases your Celiador account, chats, and server data. This cannot be undone.`,
+        { modal: true },
+        "Delete Account"
+      );
+      if (confirm !== "Delete Account") return;
+      try {
+        await api.deleteAccount();
+        await auth.signOut();
+        void vscode.window.showInformationMessage("Your Celiador account has been deleted.");
+      } catch (err: any) {
+        void vscode.window.showErrorMessage(`Couldn't delete your account: ${err?.message ?? err}`);
+      }
     })
   );
 
