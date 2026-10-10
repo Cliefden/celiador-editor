@@ -70,10 +70,31 @@ app**, not just the dev build; each phase ships independently.
   beside the editor with its own Keep/Undo hunks (`screenshots/phase2-inline-multifile.png`).
 - **Phase 2 done.**
 
-## Phase 3 — Codebase context (moat #1)
-- `@`-mentions: files, symbols, folders, git, docs, web.
-- Semantic codebase indexing (embeddings) for retrieval. Decision: **daemon-side**
-  (fits daemon-as-hub + mobile) vs local. Largest item; its own design.
+## Phase 3 — Codebase context (moat #1) — DE-RISKED by audit (2026-10-07)
+Audit finding: the context plumbing **already exists**; this is wiring, not a build.
+What's present: the full attachment/variable model (`chat/common/attachments/
+chatVariableEntries.ts` — file/dir/symbol/image/implicit/chat-ref/agent-host kinds),
+the message wire format with `attachments[]` (`agentHost/.../channels-chat/state.ts`),
+sessions-window attachment pills (`sessions/contrib/chat/browser/
+newChatContextAttachments.ts`), agent-host input completions (`agentHostInputCompletions.ts`),
+implicit context auto-attach of editor selection/file (`attachments/implicitContextAttachment.ts`),
+a **ripgrep search tool** in the agentHost server tool groups, and LSP workspace symbols.
+
+**Semantic indexing is NOT needed for the MVP.** The daemon-routed Claude agent already
+has grep/glob/read tools, so "knows your codebase" is largely agent-driven today;
+@-mentions + auto-context close most of the remaining gap.
+
+Smallest high-value slice (Phase 3A — wiring, no embeddings):
+1. Register `@` (and `#`) as completion triggers in the sessions input and call the
+   agent-host `provideChatInputCompletions` RPC → `@file`/`@symbol`/`@skill`/`@command`
+   candidates → accepted entries become attachment pills (`agentHostInputCompletions.ts`).
+2. Bridge the workspace symbol provider into those completions for `@symbol`.
+3. Turn on implicit context (auto-attach active file + selection) by default, with a toggle.
+
+Defer true semantic indexing (embeddings, daemon-side chunking) until the agent-driven +
+@-mention path proves insufficient. **Ownership note:** the sessions input editor and the
+agent-host completions RPC are in the actively-churning agentHost/sessions workstream —
+coordinate before implementing.
 - **Design proposal:** `docs/CODEBASE_CONTEXT.md` (options A–D, recommendation, open
   decisions). Verified today: `#file:` / Add Context references reach the Claude agent,
   which also searches on its own with Grep/Glob/Read; no semantic index exists.
