@@ -81,6 +81,11 @@
         "command": "celiador.toggleInlineCompletions",
         "title": "Celiador: Toggle Tab Autocomplete",
         "category": "Celiador"
+      },
+      {
+        "command": "celiador.deleteAccount",
+        "title": "Celiador: Delete Account",
+        "category": "Celiador"
       }
     ],
     "viewsContainers": {

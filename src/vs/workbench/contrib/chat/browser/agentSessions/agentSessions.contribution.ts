@@ -19,6 +19,8 @@ import { ISubmenuItem, MenuId, MenuRegistry, registerAction2 } from '../../../..
 import { OpenAgentSessionInEditorGroupAction, OpenAgentSessionInNewEditorGroupAction, OpenAgentSessionInNewWindowAction, ShowAgentSessionsSidebar, HideAgentSessionsSidebar, ToggleAgentSessionsSidebar, RefreshAgentSessionsViewerAction, FindAgentSessionInViewerAction, MarkAgentSessionUnreadAction, MarkAgentSessionReadAction, FocusAgentSessionsAction, SetAgentSessionsOrientationStackedAction, SetAgentSessionsOrientationSideBySideAction, MarkAllAgentSessionsReadAction, RenameAgentSessionAction, DeleteAgentSessionAction, DeleteAllLocalSessionsAction, MarkAgentSessionSectionReadAction, ToggleShowAgentSessionsAction, PinAgentSessionAction, UnpinAgentSessionAction, CollapseAllAgentSessionSectionsAction, getAgentSessionArchiveActionConstructors } from './agentSessionsActions.js';
 import { AgentHostPermissionUiContribution } from './agentHost/agentHostPermissionUiContribution.js';
 import { CeliadorRelayBridge } from './agentHost/celiadorRelayBridge.js';
+import { CeliadorWorkspacePresence } from './agentHost/celiadorWorkspacePresence.js';
+import { CeliadorEditorControl } from './agentHost/celiadorEditorControl.js';
 import { registerExternalSessionsFilterMenu } from './externalSessionsFilterMenu.js';
 import './agentHost/agentHostChatInputPicker.contribution.js';
 import './agentHost/agentHostModeSynchronizer.js';
@@ -189,6 +191,10 @@ registerWorkbenchContribution2(LocalAgentsSessionsController.ID, LocalAgentsSess
 registerWorkbenchContribution2(AgentHostPermissionUiContribution.ID, AgentHostPermissionUiContribution, WorkbenchPhase.BlockRestore);
 // Celiador: mirror live agent-host sessions to the daemon relay for the companion phone.
 registerWorkbenchContribution2(CeliadorRelayBridge.ID, CeliadorRelayBridge, WorkbenchPhase.AfterRestored);
+// Celiador: heartbeat open repos to the daemon for the phone's "from your editor" picker.
+registerWorkbenchContribution2(CeliadorWorkspacePresence.ID, CeliadorWorkspacePresence, WorkbenchPhase.AfterRestored);
+// Celiador: listen for the phone's "Run on your editor" requests and start a local run.
+registerWorkbenchContribution2(CeliadorEditorControl.ID, CeliadorEditorControl, WorkbenchPhase.AfterRestored);
 
 registerSingleton(IAgentSessionsService, AgentSessionsService, InstantiationType.Delayed);
 
