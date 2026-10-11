@@ -76,6 +76,11 @@
         "command": "celiador.manageBilling",
         "title": "Celiador: Manage Billing",
         "category": "Celiador"
+      },
+      {
+        "command": "celiador.toggleInlineCompletions",
+        "title": "Celiador: Toggle Tab Autocomplete",
+        "category": "Celiador"
       }
     ],
     "viewsContainers": {
@@ -117,6 +122,19 @@
           "markdownDescription": "Override the Supabase/GoTrue base URL used for sign-in. Leave empty to use the value from the daemon's `GET /api/config` (self-hosted defaults to the daemon URL).",
           "scope": "application",
           "restricted": true
+        },
+        "celiador.inlineCompletions.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Experimental: show model-backed inline \"Tab autocomplete\" suggestions as you type, routed through the Celiador daemon. Off by default — the agent (⌘I inline edit and the Agents view) is the primary way to get Celiador's help; Tab autocomplete is a lighter-weight convenience and may be less reliable.",
+          "scope": "application"
+        },
+        "celiador.inlineCompletions.debounceMs": {
+          "type": "number",
+          "default": 300,
+          "minimum": 0,
+          "markdownDescription": "How long to wait after you stop typing before requesting a Tab-autocomplete suggestion. Lower feels snappier but sends more requests.",
+          "scope": "application"
         }
       }
     }

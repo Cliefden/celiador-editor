@@ -4,6 +4,7 @@ import { registerCeliadorAuthProvider } from "./authProvider";
 import { CeliadorChangesViewProvider } from "./changesView";
 import { CeliadorWelcomeViewProvider } from "./welcomeView";
 import { DaemonApi } from "./api";
+import { registerInlineCompletions } from "./inlineCompletionsProvider";
 import { resolveDaemonUrl } from "./productConfig";
 
 // The agent itself is the native Agents Window (Claude Agent SDK), routed through the
@@ -86,6 +87,19 @@ export function activate(context: vscode.ExtensionContext): void {
   // Git-review "Changes" view in the Celiador sidebar.
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(CeliadorChangesViewProvider.viewId, new CeliadorChangesViewProvider())
+  );
+
+  // Experimental "Tab autocomplete" — inline completions via the daemon
+  // (/api/complete, Haiku). Off by default; see celiador.inlineCompletions.enabled.
+  context.subscriptions.push(registerInlineCompletions(auth));
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("celiador.toggleInlineCompletions", async () => {
+      const cfg = vscode.workspace.getConfiguration("celiador");
+      const next = !cfg.get<boolean>("inlineCompletions.enabled", false);
+      await cfg.update("inlineCompletions.enabled", next, vscode.ConfigurationTarget.Global);
+      void vscode.window.showInformationMessage(`Celiador Tab autocomplete ${next ? "enabled" : "disabled"}.`);
+    })
   );
 
   // Expose the Supabase session as a VS Code authentication provider so the native
