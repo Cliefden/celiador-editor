@@ -127,7 +127,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		} catch {
 			return;
 		}
-		if (cmd.kind !== 'start-run' || !cmd.requestId || !cmd.remoteUrl || !cmd.prompt) {
+		if (cmd.kind !== 'start-run' || !cmd.requestId || !cmd.remoteUrl) {
 			return;
 		}
 		if (this._handled.has(cmd.requestId)) {
@@ -140,7 +140,10 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		}
 		this._handled.add(cmd.requestId);
 		try {
-			await this._commandService.executeCommand(CeliadorEditorControl.OPEN_SESSION_COMMAND, 'sidebar', { prompt: cmd.prompt });
+			// With a prompt, seed the first turn; without one, open an idle session so
+			// the phone lands in a live chat and types the first message itself.
+			const sendOptions = cmd.prompt && cmd.prompt.trim() ? { prompt: cmd.prompt } : undefined;
+			await this._commandService.executeCommand(CeliadorEditorControl.OPEN_SESSION_COMMAND, 'sidebar', sendOptions);
 			this._logService.trace(`[celiador-control] started a run for ${cmd.name ?? cmd.remoteUrl}`);
 		} catch (e) {
 			this._handled.delete(cmd.requestId);

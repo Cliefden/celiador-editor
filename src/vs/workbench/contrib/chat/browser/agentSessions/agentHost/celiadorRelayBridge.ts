@@ -72,6 +72,10 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private readonly _pendingApprovals = new Map<string, { readonly chatChannel: string; readonly turnId: string; readonly toolCallId: string }>();
 	/** input request id → what a phone answer must dispatch back. */
 	private readonly _pendingQuestions = new Map<string, { readonly chatChannel: string; readonly questionId: string }>();
+	/** Session keys seen in a prior reconcile — distinguishes a freshly-created session from startup state. */
+	private readonly _seen = new Set<string>();
+	/** True once the first reconcile has run, so startup's idle/terminal sessions aren't back-filled. */
+	private _initialized = false;
 
 	constructor(
 		@IAgentSessionsService private readonly _sessionsService: IAgentSessionsService,
@@ -128,9 +132,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			let client = this._clients.get(key);
 
 			if (!client) {
-				// Only start relaying once a session is actually active — don't mirror
-				// the whole completed-session history on startup.
-				if (!active) {
+				// Start mirroring once a session is active, OR as soon as a NEW session
+				// is created after startup — so a phone-initiated or just-opened idle
+				// session shows up (and is typeable) before its first turn. Pre-existing
+				// idle/terminal sessions present at startup are not back-filled.
+				const isNew = !this._seen.has(key);
+				if (!(active || (this._initialized && isNew && !terminal))) {
 					continue;
 				}
 				client = this._createClient(key, session.resource);
@@ -151,6 +158,14 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				this._disposeClient(key);
 			}
 		}
+
+		// Remember which sessions we've now seen (so the next reconcile can tell a
+		// freshly-created session from startup state), pruning keys no longer live.
+		this._seen.clear();
+		for (const key of live.keys()) {
+			this._seen.add(key);
+		}
+		this._initialized = true;
 	}
 
 	private _createClient(key: string, resource: URI): CeliadorRelayClient {
