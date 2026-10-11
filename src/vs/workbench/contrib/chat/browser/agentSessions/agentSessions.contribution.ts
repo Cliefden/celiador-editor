@@ -20,6 +20,7 @@ import { OpenAgentSessionInEditorGroupAction, OpenAgentSessionInNewEditorGroupAc
 import { AgentHostPermissionUiContribution } from './agentHost/agentHostPermissionUiContribution.js';
 import { CeliadorRelayBridge } from './agentHost/celiadorRelayBridge.js';
 import { CeliadorWorkspacePresence } from './agentHost/celiadorWorkspacePresence.js';
+import { CeliadorEditorControl } from './agentHost/celiadorEditorControl.js';
 import { registerExternalSessionsFilterMenu } from './externalSessionsFilterMenu.js';
 import './agentHost/agentHostChatInputPicker.contribution.js';
 import './agentHost/agentHostModeSynchronizer.js';
@@ -192,6 +193,8 @@ registerWorkbenchContribution2(AgentHostPermissionUiContribution.ID, AgentHostPe
 registerWorkbenchContribution2(CeliadorRelayBridge.ID, CeliadorRelayBridge, WorkbenchPhase.AfterRestored);
 // Celiador: heartbeat open repos to the daemon for the phone's "from your editor" picker.
 registerWorkbenchContribution2(CeliadorWorkspacePresence.ID, CeliadorWorkspacePresence, WorkbenchPhase.AfterRestored);
+// Celiador: listen for the phone's "Run on your editor" requests and start a local run.
+registerWorkbenchContribution2(CeliadorEditorControl.ID, CeliadorEditorControl, WorkbenchPhase.AfterRestored);
 
 registerSingleton(IAgentSessionsService, AgentSessionsService, InstantiationType.Delayed);
 

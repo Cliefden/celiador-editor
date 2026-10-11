@@ -119,7 +119,7 @@ export class CeliadorWorkspacePresence extends Disposable implements IWorkbenchC
 }
 
 /** Pick the origin remote url from a git config (else the first remote). */
-function parseRemoteUrl(config: string): string | undefined {
+export function parseRemoteUrl(config: string): string | undefined {
 	const remotes = new Map<string, string>();
 	let current: string | undefined;
 	for (const line of config.split(/\r?\n/)) {
@@ -143,7 +143,7 @@ function parseRemoteUrl(config: string): string | undefined {
 }
 
 /** Normalise a git remote (scp/ssh/git/https) to a credential-free https URL, or undefined. */
-function normalizeToHttps(url: string): string | undefined {
+export function normalizeToHttps(url: string): string | undefined {
 	if (/^https:\/\//i.test(url)) {
 		return url.replace(/^(https:\/\/)[^@/]+@/i, '$1'); // strip any embedded creds
 	}
