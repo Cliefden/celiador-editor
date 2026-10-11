@@ -72,10 +72,10 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private readonly _pendingApprovals = new Map<string, { readonly chatChannel: string; readonly turnId: string; readonly toolCallId: string }>();
 	/** input request id → what a phone answer must dispatch back. */
 	private readonly _pendingQuestions = new Map<string, { readonly chatChannel: string; readonly questionId: string }>();
-	/** Session keys seen in a prior reconcile — distinguishes a freshly-created session from startup state. */
-	private readonly _seen = new Set<string>();
-	/** True once the first reconcile has run, so startup's idle/terminal sessions aren't back-filled. */
-	private _initialized = false;
+	/** Agent-host sessions present at the first reconcile; anything not here was created by the user later. Undefined until the first reconcile snapshots it. */
+	private _startupKeys: Set<string> | undefined;
+	/** Keys that have been active at least once — so a freshly-opened idle session (which can momentarily read as Completed) isn't disposed or reported as done before its first turn. */
+	private readonly _everActive = new Set<string>();
 
 	constructor(
 		@IAgentSessionsService private readonly _sessionsService: IAgentSessionsService,
@@ -119,6 +119,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			}
 		}
 
+		// First reconcile: snapshot the pre-existing sessions so we never back-fill
+		// them — only sessions created after this count as user-created.
+		if (this._startupKeys === undefined) {
+			this._startupKeys = new Set(live.keys());
+		}
+
 		// Drop clients whose session no longer exists.
 		for (const key of [...this._clients.keys()]) {
 			if (!live.has(key)) {
@@ -129,16 +135,21 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		for (const [key, session] of live) {
 			const active = session.status === ChatSessionStatus.InProgress || session.status === ChatSessionStatus.NeedsInput;
 			const terminal = session.status === ChatSessionStatus.Completed || session.status === ChatSessionStatus.Failed;
+			if (active) {
+				this._everActive.add(key);
+			}
+			const userCreated = !this._startupKeys.has(key);
 			let client = this._clients.get(key);
 
 			if (!client) {
-				// Start mirroring once a session is active, OR as soon as a NEW session
-				// is created after startup — so a phone-initiated or just-opened idle
-				// session shows up (and is typeable) before its first turn. Pre-existing
-				// idle/terminal sessions present at startup are not back-filled.
-				const isNew = !this._seen.has(key);
-				if (!(active || (this._initialized && isNew && !terminal))) {
+				// Mirror once a session is active, OR as soon as the user creates one
+				// (incl. a prompt-less idle chat opened from the phone), so it shows up
+				// and is typeable before its first turn. Startup sessions aren't back-filled.
+				if (!(active || userCreated)) {
 					continue;
+				}
+				if (userCreated && !active) {
+					this._logService.trace(`[celiador-relay] mirroring user-created session status=${String(session.status)} terminal=${terminal}`);
 				}
 				client = this._createClient(key, session.resource);
 				const title = session.label || 'Agent session';
@@ -153,19 +164,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			}
 
 			this._publishStatus(key, session.status, client);
-			if (terminal) {
-				// Terminal status published; flush + close this session's relay.
+			// Only close once a run that actually started has finished — a freshly
+			// opened idle session can read as terminal before its first turn.
+			if (terminal && this._everActive.has(key)) {
 				this._disposeClient(key);
 			}
 		}
-
-		// Remember which sessions we've now seen (so the next reconcile can tell a
-		// freshly-created session from startup state), pruning keys no longer live.
-		this._seen.clear();
-		for (const key of live.keys()) {
-			this._seen.add(key);
-		}
-		this._initialized = true;
 	}
 
 	private _createClient(key: string, resource: URI): CeliadorRelayClient {
@@ -399,6 +403,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	/** Publish a status change; only once the relay session is live, and only on change. */
 	private _publishStatus(key: string, status: ChatSessionStatus, client: CeliadorRelayClient): void {
 		if (!client.active || this._lastStatus.get(key) === status) {
+			return;
+		}
+		// Don't report a terminal state for a session that never actually ran — a
+		// freshly opened idle chat can momentarily read as Completed, and the phone
+		// would show it as finished (and in the wrong list) before the first turn.
+		if ((status === ChatSessionStatus.Completed || status === ChatSessionStatus.Failed) && !this._everActive.has(key)) {
 			return;
 		}
 		this._lastStatus.set(key, status);
