@@ -8,6 +8,7 @@ import { Disposable, DisposableStore, IReference } from '../../../../../../base/
 import { isEqualOrParent, joinPath } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
+import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
@@ -24,7 +25,7 @@ import { IChatService } from '../../../common/chatService/chatService.js';
 import { ChatSessionStatus } from '../../../common/chatSessionsService.js';
 import { isAgentHostTarget } from '../agentSessions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
-import { CeliadorRelayClient, RelayFsKind } from './celiadorRelayClient.js';
+import { CeliadorRelayClient, RelayFsKind, RelayGitKind } from './celiadorRelayClient.js';
 
 /**
  * Celiador: editor-as-runner relay bridge. Mirrors each live local agent-host
@@ -82,6 +83,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		@ILogService private readonly _logService: ILogService,
 		@IFileService private readonly _fileService: IFileService,
 		@IWorkspaceContextService private readonly _workspaceService: IWorkspaceContextService,
+		@ICommandService private readonly _commandService: ICommandService,
 	) {
 		super();
 		// Accessing `.model` lazily resolves all session providers; its change event
@@ -163,6 +165,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			onInstruct: (text) => this._sendInstruction(key, text),
 			onAnswer: (requestId, text) => this._answerQuestion(requestId, text),
 			onFsCommand: (kind, requestId, path, content) => { void this._handleFsCommand(key, kind, requestId, path, content); },
+			onGitCommand: (kind, requestId, args) => { void this._handleGitCommand(key, kind, requestId, args); },
 		});
 		this._clients.set(key, client);
 		this._watchSession(key, resource);
@@ -371,6 +374,28 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		}
 	}
 
+	/**
+	 * A phone run-review request arrived (git status / diff / commit / revert).
+	 * Delegate to the celiador-ai extension's `celiador.relayGit` command — the
+	 * extension host runs it through the vscode.git machinery — and publish the
+	 * result back as an `fs.result` carrying the same `requestId`.
+	 */
+	private async _handleGitCommand(key: string, kind: RelayGitKind, requestId: string, args: { path?: string; message?: string; paths?: string[] }): Promise<void> {
+		const client = this._clients.get(key);
+		if (!client) {
+			return;
+		}
+		try {
+			const result = await this._commandService.executeCommand<{ ok: boolean;[key: string]: unknown }>('celiador.relayGit', { kind, ...args });
+			if (!result) {
+				throw new Error('run review is unavailable');
+			}
+			client.publish({ ...result, kind: 'fs.result', requestId });
+		} catch (err) {
+			client.publish({ kind: 'fs.result', requestId, ok: false, error: err instanceof Error ? err.message : String(err) });
+		}
+	}
+
 	/** Resolve a workspace-relative path under `root`, rejecting any `..` escape. */
 	private _resolveInWorkspace(root: URI, rel: string): URI | undefined {
 		const segments = (rel ?? '').split('/').filter(segment => segment.length > 0 && segment !== '.');
@@ -395,10 +420,15 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				client.publish({ kind: 'state', state: 'awaiting' });
 				break;
 			case ChatSessionStatus.Completed:
+				// The `state` event is what actually moves the daemon's session state —
+				// without it a finished run stays "running" until the command channel
+				// drops and the daemon writes it off as disconnected.
 				client.publish({ kind: 'done' });
+				client.publish({ kind: 'state', state: 'done' });
 				break;
 			case ChatSessionStatus.Failed:
 				client.publish({ kind: 'error', message: 'The agent run failed.' });
+				client.publish({ kind: 'state', state: 'error' });
 				break;
 		}
 	}

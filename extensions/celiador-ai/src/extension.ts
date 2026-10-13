@@ -4,6 +4,7 @@ import { registerCeliadorAuthProvider } from "./authProvider";
 import { CeliadorChangesViewProvider } from "./changesView";
 import { CeliadorWelcomeViewProvider } from "./welcomeView";
 import { DaemonApi, type Me } from "./api";
+import { registerGitReview } from "./gitReview";
 import { registerInlineCompletions } from "./inlineCompletionsProvider";
 import { resolveDaemonUrl } from "./productConfig";
 
@@ -84,6 +85,8 @@ export function activate(context: vscode.ExtensionContext): void {
   // Experimental "Tab autocomplete" — inline completions via the daemon
   // (/api/complete, Haiku). Off by default; see celiador.inlineCompletions.enabled.
   context.subscriptions.push(registerInlineCompletions(auth));
+  // Run review over the relay: the workbench bridge delegates git.* commands here.
+  context.subscriptions.push(registerGitReview());
 
   context.subscriptions.push(
     vscode.commands.registerCommand("celiador.toggleInlineCompletions", async () => {

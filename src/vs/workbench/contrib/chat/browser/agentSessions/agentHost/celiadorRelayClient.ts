@@ -29,14 +29,21 @@ export interface IRelayCommand {
 	readonly kind?: string;
 	readonly text?: string;
 	readonly requestId?: string;
-	/** fs.* commands: the workspace-relative path to operate on. */
+	/** fs.* / git.diff: the workspace-relative path to operate on. */
 	readonly path?: string;
 	/** fs.write: the new file contents. */
 	readonly content?: string;
+	/** git.commit: the commit message. */
+	readonly message?: string;
+	/** git.commit / git.revert: the workspace-relative paths to operate on. */
+	readonly paths?: string[];
 }
 
 /** The kinds of filesystem command the phone can round-trip to this runner. */
 export type RelayFsKind = 'fs.list' | 'fs.read' | 'fs.write';
+
+/** The kinds of run-review (git) command the phone can round-trip to this runner. */
+export type RelayGitKind = 'git.status' | 'git.diff' | 'git.commit' | 'git.revert';
 
 /** Debounce window for coalescing high-frequency events (streamed deltas). */
 const FLUSH_MS = 150;
@@ -68,6 +75,12 @@ export interface ICeliadorRelayClientOptions {
 	 * the same `requestId`.
 	 */
 	readonly onFsCommand?: (kind: RelayFsKind, requestId: string, path: string, content: string | undefined) => void;
+	/**
+	 * The phone requested a run-review git operation (status / diff / commit /
+	 * revert). The handler performs it and replies by publishing an `fs.result`
+	 * event carrying the same `requestId`.
+	 */
+	readonly onGitCommand?: (kind: RelayGitKind, requestId: string, args: { path?: string; message?: string; paths?: string[] }) => void;
 }
 
 export class CeliadorRelayClient extends Disposable {
@@ -295,6 +308,8 @@ export class CeliadorRelayClient extends Disposable {
 			this._options.onApprovalDecision?.(cmd.requestId, cmd.kind === 'approve');
 		} else if ((cmd.kind === 'fs.list' || cmd.kind === 'fs.read' || cmd.kind === 'fs.write') && cmd.requestId) {
 			this._options.onFsCommand?.(cmd.kind, cmd.requestId, cmd.path ?? '', cmd.content);
+		} else if ((cmd.kind === 'git.status' || cmd.kind === 'git.diff' || cmd.kind === 'git.commit' || cmd.kind === 'git.revert') && cmd.requestId) {
+			this._options.onGitCommand?.(cmd.kind, cmd.requestId, { path: cmd.path, message: cmd.message, paths: cmd.paths });
 		}
 	}
 
