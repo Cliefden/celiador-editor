@@ -11,6 +11,7 @@ import { generateUuid } from '../../../../../../base/common/uuid.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
+import { LOCAL_AGENT_HOST_SCHEME_PREFIX } from '../../../../../../platform/agentHost/common/agentHostConnectionsService.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
@@ -237,23 +238,31 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		if (direct) {
 			return direct;
 		}
-		if (this._clients.has(channel)) {
-			return channel; // session-channel action
+		// The sessions model namespaces the protocol session URI with the local
+		// agent-host scheme prefix: protocol `claude:/<id>` ↔ model
+		// `agent-host-claude:/<id>` — client keys use the model form.
+		const candidates = (uri: string): string[] => {
+			const list = [uri, `${LOCAL_AGENT_HOST_SCHEME_PREFIX}${uri}`];
+			try {
+				list.push(URI.parse(uri).toString(), URI.parse(`${LOCAL_AGENT_HOST_SCHEME_PREFIX}${uri}`).toString());
+			} catch {
+				/* not a parseable URI — string candidates suffice */
+			}
+			return list;
+		};
+		for (const candidate of candidates(channel)) {
+			if (this._clients.has(candidate)) {
+				return candidate; // session-channel action
+			}
 		}
 		const parsed = parseChatUri(channel);
 		if (!parsed || parsed.chatId.startsWith('subagent')) {
 			return undefined;
 		}
-		if (this._clients.has(parsed.session)) {
-			return parsed.session;
-		}
-		try {
-			const normalized = URI.parse(parsed.session).toString();
-			if (this._clients.has(normalized)) {
-				return normalized;
+		for (const candidate of candidates(parsed.session)) {
+			if (this._clients.has(candidate)) {
+				return candidate;
 			}
-		} catch {
-			/* not a parseable URI — fall through */
 		}
 		return undefined;
 	}
@@ -369,8 +378,11 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	 */
 	private _sendInstruction(key: string, text: string): void {
 		// The session state's chat list may be unpopulated — the default chat
-		// channel is derivable from the session resource, so fall back to it.
-		const chatChannel = this._watches.get(key)?.primary ?? buildDefaultChatUri(key);
+		// channel is derivable from the session resource, so fall back to it
+		// (built from the PROTOCOL uri: the model key carries the agent-host-
+		// scheme prefix the protocol layer doesn't know).
+		const protocolUri = key.startsWith(LOCAL_AGENT_HOST_SCHEME_PREFIX) ? key.slice(LOCAL_AGENT_HOST_SCHEME_PREFIX.length) : key;
+		const chatChannel = this._watches.get(key)?.primary ?? buildDefaultChatUri(protocolUri);
 		if (!text.trim()) {
 			return;
 		}
