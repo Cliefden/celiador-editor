@@ -53,6 +53,9 @@ const RECONNECT_MS = 1500;
 const URGENT = new Set(['approval', 'question', 'state', 'done', 'error', 'fs.result']);
 /** Delivery attempts per batch before it's dropped (relay is best-effort). */
 const MAX_ATTEMPTS = 3;
+/** Events buffered before the relay session exists (start() is async — a fast
+ * run streams deltas before the create round-trip finishes; don't drop them). */
+const MAX_PRESTART_BUFFER = 500;
 
 export interface ICeliadorRelayClientOptions {
 	/** Resolve the daemon base URL (no trailing slash), e.g. `https://celiador.ai`. */
@@ -130,18 +133,20 @@ export class CeliadorRelayClient extends Disposable {
 			}
 			const data = await res.json() as { session?: { id?: string } };
 			this._sessionId = data.session?.id;
-			this._lastState = undefined;
 			if (this._sessionId) {
 				this._openCommands(this._sessionId);
+				// Deliver anything published while the session was being created.
+				void this._flush();
 			}
 		} catch {
 			/* best-effort */
 		}
 	}
 
-	/** Queue an event for the phone; urgent kinds flush immediately. */
+	/** Queue an event for the phone; urgent kinds flush immediately. Events
+	 * published before the session exists are buffered and delivered by start(). */
 	publish(event: IRelayEvent): void {
-		if (!this._sessionId) {
+		if (this._disposed) {
 			return;
 		}
 		if (event.kind === 'state') {
@@ -151,6 +156,12 @@ export class CeliadorRelayClient extends Disposable {
 			this._lastState = event.state as string;
 		}
 		this._buffer.push(event);
+		if (this._buffer.length > MAX_PRESTART_BUFFER) {
+			this._buffer.splice(0, this._buffer.length - MAX_PRESTART_BUFFER);
+		}
+		if (!this._sessionId) {
+			return; // buffered — start() flushes once the session exists
+		}
 		if (URGENT.has(event.kind)) {
 			void this._flush();
 		} else if (!this._flushTimer) {

@@ -71,6 +71,9 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private readonly _toolNameByCallId = new Map<string, string>();
 	/** requestId (= toolCallId) → what a phone approve/deny must dispatch back. */
 	private readonly _pendingApprovals = new Map<string, { readonly chatChannel: string; readonly turnId: string; readonly toolCallId: string }>();
+	/** Texts of turns the phone itself dispatched — their ChatTurnStarted echo must
+	 * not be re-published as a user message (the daemon already logged it). */
+	private readonly _phoneSentTexts: string[] = [];
 	/** input request id → what a phone answer must dispatch back. */
 	private readonly _pendingQuestions = new Map<string, { readonly chatChannel: string; readonly questionId: string }>();
 
@@ -204,11 +207,29 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			return;
 		}
 		const client = this._clients.get(key);
-		if (!client || !client.active) {
+		if (!client) {
 			return;
 		}
+		// No `client.active` gate: the relay session is created asynchronously and a
+		// fast run streams before the create round-trip finishes — the client
+		// buffers events until the session exists, so nothing here may be dropped.
 		const action = envelope.action;
 		switch (action.type) {
+			case ActionType.ChatTurnStarted: {
+				// Mirror the user's turn so the phone transcript has the question, not
+				// just the answer. Skip turns the phone itself sent — the daemon is the
+				// single source of those (POST /:id/message logs them).
+				const text = action.message?.text;
+				if (typeof text === 'string' && text.length > 0) {
+					const echo = this._phoneSentTexts.indexOf(text);
+					if (echo >= 0) {
+						this._phoneSentTexts.splice(echo, 1);
+					} else {
+						client.publish({ kind: 'message', role: 'user', text });
+					}
+				}
+				break;
+			}
 			case ActionType.ChatDelta:
 				if (action.content.length > 0) {
 					client.publish({ kind: 'delta', text: action.content });
@@ -289,6 +310,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			return;
 		}
 		const message = { text, origin: { kind: MessageKind.User } };
+		// Remember the text so its ChatTurnStarted echo isn't re-published as a
+		// user message (bounded — stale entries age out by position).
+		this._phoneSentTexts.push(text);
+		if (this._phoneSentTexts.length > 20) {
+			this._phoneSentTexts.shift();
+		}
 		if (this._lastStatus.get(key) === ChatSessionStatus.InProgress) {
 			const action: ChatPendingMessageSetAction = {
 				type: ActionType.ChatPendingMessageSet,
