@@ -16,7 +16,7 @@ import { IAgentSubscription } from '../../../../../../platform/agentHost/common/
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
 import { ActionEnvelope, ChatInputCompletedAction, ChatPendingMessageSetAction, ChatToolCallConfirmedAction, ChatTurnStartedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
 import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputResponseKind, MessageKind, PendingMessageKind, ToolCallCancellationReason, ToolCallConfirmationReason } from '../../../../../../platform/agentHost/common/state/protocol/channels-chat/state.js';
-import { SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
+import { isDefaultChatUri, SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
@@ -63,10 +63,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private readonly _clients = new Map<string, CeliadorRelayClient>();
 	/** sessionResource.toString() → last published status (de-dupes repeats). */
 	private readonly _lastStatus = new Map<string, ChatSessionStatus>();
-	/** sessionResource.toString() → its session-state subscription + resolved default chat channel. */
-	private readonly _watches = new Map<string, { readonly ref: IReference<IAgentSubscription<SessionState>>; readonly store: DisposableStore; chatChannel: string | undefined }>();
+	/** sessionResource.toString() → its session-state subscription + resolved chat channels (primary = where instructions dispatch). */
+	private readonly _watches = new Map<string, { readonly ref: IReference<IAgentSubscription<SessionState>>; readonly store: DisposableStore; chatChannels: Set<string>; primary: string | undefined }>();
 	/** chat channel URI string → owning sessionResource.toString() (routes action events). */
 	private readonly _chatChannelToKey = new Map<string, string>();
+	/** Channels we've already trace-logged as unrouted (avoid per-delta spam). */
+	private readonly _unroutedLogged = new Set<string>();
 	/** toolCallId → tool display name (captured at ChatToolCallStart, used to label approvals). */
 	private readonly _toolNameByCallId = new Map<string, string>();
 	/** requestId (= toolCallId) → what a phone approve/deny must dispatch back. */
@@ -175,26 +177,48 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		return client;
 	}
 
-	/** Subscribe to the session's state so we can route its default-chat actions to the relay. */
+	/**
+	 * Subscribe to the session's state so we can route its chat actions to the
+	 * relay. Maps EVERY chat channel of the session (default + peers), not just
+	 * `defaultChat` — a chat typed directly into the sidebar can live on a peer
+	 * channel (and `defaultChat` can be unset) and would otherwise route nothing.
+	 */
 	private _watchSession(key: string, resource: URI): void {
 		const ref = this._agentHostService.getSubscription(StateComponents.Session, resource, 'CeliadorRelayBridge');
 		const store = new DisposableStore();
 		store.add(ref);
-		const watch = { ref, store, chatChannel: undefined as string | undefined };
+		const watch = { ref, store, chatChannels: new Set<string>(), primary: undefined as string | undefined };
 		this._watches.set(key, watch);
 		const update = () => {
 			const state = ref.object.value;
-			const next = state && !(state instanceof Error) ? state.defaultChat?.toString() : undefined;
-			if (next === watch.chatChannel) {
-				return;
+			const next = new Set<string>();
+			let primary: string | undefined;
+			if (state && !(state instanceof Error)) {
+				if (state.defaultChat) {
+					next.add(state.defaultChat.toString());
+				}
+				for (const chat of state.chats ?? []) {
+					if (chat.resource) {
+						next.add(chat.resource.toString());
+					}
+				}
+				primary = state.defaultChat?.toString()
+					?? state.chats?.find(chat => isDefaultChatUri(chat.resource))?.resource?.toString()
+					?? state.chats?.[0]?.resource?.toString();
 			}
-			if (watch.chatChannel) {
-				this._chatChannelToKey.delete(watch.chatChannel);
+			watch.primary = primary;
+			for (const old of watch.chatChannels) {
+				if (!next.has(old)) {
+					this._chatChannelToKey.delete(old);
+				}
 			}
-			watch.chatChannel = next;
-			if (next) {
-				this._chatChannelToKey.set(next, key);
+			for (const channel of next) {
+				if (!watch.chatChannels.has(channel)) {
+					this._logService.trace(`[celiador-relay] routing chat channel ${channel}`);
+				}
+				this._chatChannelToKey.set(channel, key);
 			}
+			watch.chatChannels = next;
 		};
 		store.add(ref.object.onDidChange(() => update()));
 		update();
@@ -202,8 +226,13 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 
 	/** Route one connection action to the owning session's relay and map it to a relay event. */
 	private _onAction(envelope: ActionEnvelope): void {
-		const key = this._chatChannelToKey.get(envelope.channel.toString());
+		const channel = envelope.channel.toString();
+		const key = this._chatChannelToKey.get(channel);
 		if (!key) {
+			if (this._clients.size > 0 && !this._unroutedLogged.has(channel)) {
+				this._unroutedLogged.add(channel);
+				this._logService.trace(`[celiador-relay] unrouted action channel ${channel} (known: ${[...this._chatChannelToKey.keys()].join(', ') || 'none'})`);
+			}
 			return;
 		}
 		const client = this._clients.get(key);
@@ -305,7 +334,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	 * over a live turn would race the in-flight one.
 	 */
 	private _sendInstruction(key: string, text: string): void {
-		const chatChannel = this._watches.get(key)?.chatChannel;
+		const chatChannel = this._watches.get(key)?.primary;
 		if (!chatChannel || !text.trim()) {
 			return;
 		}
@@ -469,16 +498,18 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		}
 		const watch = this._watches.get(key);
 		if (watch) {
-			if (watch.chatChannel) {
-				this._chatChannelToKey.delete(watch.chatChannel);
-				// Drop pending approvals/questions that belonged to this session's chat channel.
+			if (watch.chatChannels.size > 0) {
+				for (const channel of watch.chatChannels) {
+					this._chatChannelToKey.delete(channel);
+				}
+				// Drop pending approvals/questions that belonged to this session's chat channels.
 				for (const [requestId, pending] of this._pendingApprovals) {
-					if (pending.chatChannel === watch.chatChannel) {
+					if (watch.chatChannels.has(pending.chatChannel)) {
 						this._pendingApprovals.delete(requestId);
 					}
 				}
 				for (const [requestId, pending] of this._pendingQuestions) {
-					if (pending.chatChannel === watch.chatChannel) {
+					if (watch.chatChannels.has(pending.chatChannel)) {
 						this._pendingQuestions.delete(requestId);
 					}
 				}
