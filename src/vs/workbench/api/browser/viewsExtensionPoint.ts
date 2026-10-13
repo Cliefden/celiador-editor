@@ -630,6 +630,10 @@ class ViewsExtensionHandler implements IWorkbenchContribution {
 			case 'debug': return this.viewContainersRegistry.get(DEBUG);
 			case 'scm': return this.viewContainersRegistry.get(SCM);
 			case 'remote': return this.viewContainersRegistry.get(REMOTE);
+			// Celiador: let the built-in celiador-ai extension dock its views in the
+			// core chat container (ChatViewContainerId) so the auxiliary bar carries a
+			// single "Chat" tab instead of a separate extension container beside it.
+			case 'chat': return this.viewContainersRegistry.get('workbench.panel.chat');
 			default: return this.viewContainersRegistry.get(`workbench.view.extension.${value}`);
 		}
 	}

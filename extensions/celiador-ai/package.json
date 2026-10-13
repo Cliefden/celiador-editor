@@ -88,26 +88,19 @@
         "category": "Celiador"
       }
     ],
-    "viewsContainers": {
-      "secondarySidebar": [
-        {
-          "id": "celiador",
-          "title": "Celiador",
-          "icon": "media/celiador.svg"
-        }
-      ]
-    },
     "views": {
-      "celiador": [
+      "chat": [
         {
           "id": "celiador.welcome",
-          "name": "Celiador",
-          "type": "webview"
+          "name": "Account",
+          "type": "webview",
+          "visibility": "collapsed"
         },
         {
           "id": "celiador.changes",
           "name": "Changes",
-          "type": "webview"
+          "type": "webview",
+          "visibility": "collapsed"
         }
       ]
     },
