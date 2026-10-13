@@ -126,7 +126,6 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 
 		for (const [key, session] of live) {
 			const active = session.status === ChatSessionStatus.InProgress || session.status === ChatSessionStatus.NeedsInput;
-			const terminal = session.status === ChatSessionStatus.Completed || session.status === ChatSessionStatus.Failed;
 			let client = this._clients.get(key);
 
 			if (!client) {
@@ -147,11 +146,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				continue;
 			}
 
+			// Publish status changes but KEEP the relay client (and its command
+			// channel) attached through terminal states: a finished run is exactly
+			// when the phone reviews it (git status/diff/commit/revert), browses
+			// files, or sends a follow-up that starts the next turn. The client is
+			// dropped when the session leaves the model (above) or on dispose.
 			this._publishStatus(key, session.status, client);
-			if (terminal) {
-				// Terminal status published; flush + close this session's relay.
-				this._disposeClient(key);
-			}
 		}
 	}
 
