@@ -16,7 +16,7 @@ import { IAgentSubscription } from '../../../../../../platform/agentHost/common/
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
 import { ActionEnvelope, ChatInputCompletedAction, ChatPendingMessageSetAction, ChatToolCallConfirmedAction, ChatTurnStartedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
 import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputResponseKind, MessageKind, PendingMessageKind, ToolCallCancellationReason, ToolCallConfirmationReason } from '../../../../../../platform/agentHost/common/state/protocol/channels-chat/state.js';
-import { isDefaultChatUri, SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
+import { buildDefaultChatUri, isDefaultChatUri, parseChatUri, SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
@@ -224,14 +224,48 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		update();
 	}
 
+	/**
+	 * Resolve which mirrored session an action channel belongs to. Chat actions
+	 * arrive on `ahp-chat://` channel URIs that ENCODE their owning session (see
+	 * parseChatUri — the state's `chats`/`defaultChat` are often not yet populated
+	 * when the first deltas stream), and session-level actions arrive on the
+	 * session resource itself. Subagent chats are excluded — their deltas would
+	 * pollute the phone transcript.
+	 */
+	private _resolveActionKey(channel: string): string | undefined {
+		const direct = this._chatChannelToKey.get(channel);
+		if (direct) {
+			return direct;
+		}
+		if (this._clients.has(channel)) {
+			return channel; // session-channel action
+		}
+		const parsed = parseChatUri(channel);
+		if (!parsed || parsed.chatId.startsWith('subagent')) {
+			return undefined;
+		}
+		if (this._clients.has(parsed.session)) {
+			return parsed.session;
+		}
+		try {
+			const normalized = URI.parse(parsed.session).toString();
+			if (this._clients.has(normalized)) {
+				return normalized;
+			}
+		} catch {
+			/* not a parseable URI — fall through */
+		}
+		return undefined;
+	}
+
 	/** Route one connection action to the owning session's relay and map it to a relay event. */
 	private _onAction(envelope: ActionEnvelope): void {
 		const channel = envelope.channel.toString();
-		const key = this._chatChannelToKey.get(channel);
+		const key = this._resolveActionKey(channel);
 		if (!key) {
 			if (this._clients.size > 0 && !this._unroutedLogged.has(channel)) {
 				this._unroutedLogged.add(channel);
-				this._logService.trace(`[celiador-relay] unrouted action channel ${channel} (known: ${[...this._chatChannelToKey.keys()].join(', ') || 'none'})`);
+				this._logService.trace(`[celiador-relay] unrouted action channel ${channel} (clients: ${[...this._clients.keys()].join(', ') || 'none'})`);
 			}
 			return;
 		}
@@ -334,8 +368,10 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	 * over a live turn would race the in-flight one.
 	 */
 	private _sendInstruction(key: string, text: string): void {
-		const chatChannel = this._watches.get(key)?.primary;
-		if (!chatChannel || !text.trim()) {
+		// The session state's chat list may be unpopulated — the default chat
+		// channel is derivable from the session resource, so fall back to it.
+		const chatChannel = this._watches.get(key)?.primary ?? buildDefaultChatUri(key);
+		if (!text.trim()) {
 			return;
 		}
 		const message = { text, origin: { kind: MessageKind.User } };
