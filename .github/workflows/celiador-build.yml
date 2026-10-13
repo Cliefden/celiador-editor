@@ -1,12 +1,15 @@
 name: Celiador Build
 
 # Builds the Celiador desktop app for macOS, Windows and Linux.
-# Runs ONLY on demand, because a three-platform build is expensive (macOS minutes bill
-# at 10x, Windows at 2x):
+# Runs ONLY on demand, because hosted multi-platform builds are expensive (Windows
+# minutes bill at 2x, Linux at 1x):
 # - Manual run (Actions > Celiador Build > Run workflow): pick one platform or all; the
 #   packages are uploaded as workflow artifacts.
 # - Pushing a tag like v0.1.0 builds every platform and attaches the packages to a draft
 #   GitHub release.
+# The macOS job runs on the self-hosted runner "scw-mac" (labels self-hosted/macOS/ARM64)
+# instead of a hosted macos-15 image: hosted macOS bills at 10x and burned through the
+# account's Actions quota. Self-hosted minutes are never billed; the Mac must be awake.
 # Day-to-day validation happens locally (scripts/test.sh, typecheck, a local packaged build).
 
 on:
@@ -268,7 +271,7 @@ jobs:
   macos:
     name: macOS (${{ matrix.arch }})
     if: github.event_name == 'push' || inputs.platform == 'macos' || inputs.platform == 'all'
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -343,15 +346,21 @@ jobs:
           if [ -n "$MACOS_CERTIFICATE" ] && [ -n "$MACOS_SIGNING_IDENTITY" ]; then
             KEYCHAIN="$RUNNER_TEMP/celiador-signing.keychain-db"
             KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
+            # The runner is a real, persistent Mac (not a throwaway VM): remember the
+            # keychain search list so it can be restored — otherwise every signed build
+            # would leave a dangling temp-keychain entry behind.
+            ORIG_KEYCHAINS=$(security list-keychains -d user | tr -d '"')
             echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
             security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
             security set-keychain-settings -lut 21600 "$KEYCHAIN"
             security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
             security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
             security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
-            security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+            security list-keychains -d user -s "$KEYCHAIN" $ORIG_KEYCHAINS
             rm "$RUNNER_TEMP/cert.p12"
             codesign --force --deep --sign "$MACOS_SIGNING_IDENTITY" --keychain "$KEYCHAIN" "$APP"
+            security list-keychains -d user -s $ORIG_KEYCHAINS
+            security delete-keychain "$KEYCHAIN"
           else
             echo "::warning::MACOS_CERTIFICATE / MACOS_SIGNING_IDENTITY not set; signing ad-hoc. Downloaded copies need 'xattr -dr com.apple.quarantine Celiador.app' before first launch."
             codesign --force --deep --sign - "$APP"
