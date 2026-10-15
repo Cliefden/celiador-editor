@@ -26,7 +26,7 @@ import { IChatService } from '../../../common/chatService/chatService.js';
 import { ChatSessionStatus } from '../../../common/chatSessionsService.js';
 import { isAgentHostTarget } from '../agentSessions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
-import { CeliadorRelayClient, RelayFsKind, RelayGitKind } from './celiadorRelayClient.js';
+import { CeliadorRelayClient, IRelayGitArgs, RelayFsKind, RelayGitKind } from './celiadorRelayClient.js';
 
 /**
  * Celiador: editor-as-runner relay bridge. Mirrors each live local agent-host
@@ -541,7 +541,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	 * extension host runs it through the vscode.git machinery — and publish the
 	 * result back as an `fs.result` carrying the same `requestId`.
 	 */
-	private async _handleGitCommand(key: string, kind: RelayGitKind, requestId: string, args: { path?: string; message?: string; paths?: string[] }): Promise<void> {
+	private async _handleGitCommand(key: string, kind: RelayGitKind, requestId: string, args: IRelayGitArgs): Promise<void> {
 		const client = this._clients.get(key);
 		if (!client) {
 			return;
