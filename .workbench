@@ -1,0 +1,14 @@
+# Read by `wb` (github.com/Cliefden/workbench) — worktrees, board, dev stack.
+#
+# NOTE: editor worktrees are EXPENSIVE — the npm install builds native modules
+# (several GB, several minutes per worktree). Reserve them for long-lived
+# parallel tracks (an upstream rebase beside feature work); for small fixes,
+# work on a branch in the main checkout's siblings instead.
+WB_PROJECT="Celiador"
+
+wb_setup() {
+  DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
+    fnm exec --using 24.18.0 npm install
+}
+
+# No WB_SERVICES: the built app is packaged with gulp, not run as a service.

@@ -54,3 +54,6 @@ dist
 .v[0-9]*/
 # Local agent validation evidence
 .agent-validation/
+
+# wb worktrees (one checkout per issue; see github.com/Cliefden/workbench)
+/.claude/worktrees/
