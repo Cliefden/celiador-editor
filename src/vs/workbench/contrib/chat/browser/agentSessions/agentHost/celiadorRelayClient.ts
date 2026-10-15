@@ -37,13 +37,29 @@ export interface IRelayCommand {
 	readonly message?: string;
 	/** git.commit / git.revert: the workspace-relative paths to operate on. */
 	readonly paths?: string[];
+	/** git.pr: the pull request title. */
+	readonly title?: string;
+	/** git.pr: the pull request body. */
+	readonly body?: string;
+	/** git.pr: the base branch (defaults to the repository's default branch). */
+	readonly base?: string;
 }
 
 /** The kinds of filesystem command the phone can round-trip to this runner. */
 export type RelayFsKind = 'fs.list' | 'fs.read' | 'fs.write';
 
 /** The kinds of run-review (git) command the phone can round-trip to this runner. */
-export type RelayGitKind = 'git.status' | 'git.diff' | 'git.commit' | 'git.revert';
+export type RelayGitKind = 'git.status' | 'git.diff' | 'git.commit' | 'git.revert' | 'git.push' | 'git.pr';
+
+/** The per-kind arguments of a relayed git command (see {@link IRelayCommand}). */
+export interface IRelayGitArgs {
+	readonly path?: string;
+	readonly message?: string;
+	readonly paths?: string[];
+	readonly title?: string;
+	readonly body?: string;
+	readonly base?: string;
+}
 
 /** Debounce window for coalescing high-frequency events (streamed deltas). */
 const FLUSH_MS = 150;
@@ -83,7 +99,7 @@ export interface ICeliadorRelayClientOptions {
 	 * revert). The handler performs it and replies by publishing an `fs.result`
 	 * event carrying the same `requestId`.
 	 */
-	readonly onGitCommand?: (kind: RelayGitKind, requestId: string, args: { path?: string; message?: string; paths?: string[] }) => void;
+	readonly onGitCommand?: (kind: RelayGitKind, requestId: string, args: IRelayGitArgs) => void;
 }
 
 export class CeliadorRelayClient extends Disposable {
@@ -319,8 +335,8 @@ export class CeliadorRelayClient extends Disposable {
 			this._options.onApprovalDecision?.(cmd.requestId, cmd.kind === 'approve');
 		} else if ((cmd.kind === 'fs.list' || cmd.kind === 'fs.read' || cmd.kind === 'fs.write') && cmd.requestId) {
 			this._options.onFsCommand?.(cmd.kind, cmd.requestId, cmd.path ?? '', cmd.content);
-		} else if ((cmd.kind === 'git.status' || cmd.kind === 'git.diff' || cmd.kind === 'git.commit' || cmd.kind === 'git.revert') && cmd.requestId) {
-			this._options.onGitCommand?.(cmd.kind, cmd.requestId, { path: cmd.path, message: cmd.message, paths: cmd.paths });
+		} else if ((cmd.kind === 'git.status' || cmd.kind === 'git.diff' || cmd.kind === 'git.commit' || cmd.kind === 'git.revert' || cmd.kind === 'git.push' || cmd.kind === 'git.pr') && cmd.requestId) {
+			this._options.onGitCommand?.(cmd.kind, cmd.requestId, { path: cmd.path, message: cmd.message, paths: cmd.paths, title: cmd.title, body: cmd.body, base: cmd.base });
 		}
 	}
 

@@ -3,15 +3,19 @@ import * as vscode from "vscode";
 // The relay's run-review executor. The workbench relay bridge receives `git.*`
 // commands from the phone (via the daemon) and delegates here over the
 // `celiador.relayGit` command — the extension host has the vscode.git extension
-// API, so status/diff/commit/discard run through the editor's own git machinery
-// (no raw process spawning, honors the user's git config and hooks).
+// API, so status/diff/commit/discard/push run through the editor's own git
+// machinery (no raw process spawning, honors the user's git config, hooks and
+// credentials), and a pull request is opened with the editor's GitHub sign-in.
 
 /** Arguments the bridge passes through from the relayed git.* command. */
 interface GitReviewArgs {
-  kind: "git.status" | "git.diff" | "git.commit" | "git.revert";
+  kind: "git.status" | "git.diff" | "git.commit" | "git.revert" | "git.push" | "git.pr";
   path?: string;
   message?: string;
   paths?: string[];
+  title?: string;
+  body?: string;
+  base?: string;
 }
 
 /** The `fs.result` payload (minus requestId, which the bridge owns). */
@@ -22,6 +26,9 @@ interface GitReviewResult {
   files?: Array<{ path: string; status: string }>;
   patch?: string;
   sha?: string;
+  remote?: string;
+  url?: string;
+  created?: boolean;
 }
 
 // Minimal slices of the vscode.git API (extensions/git/src/api/git.d.ts).
@@ -29,10 +36,16 @@ interface GitChange {
   uri: vscode.Uri;
   status: number;
 }
+interface GitRemote {
+  name: string;
+  fetchUrl?: string;
+  pushUrl?: string;
+}
 interface GitRepository {
   rootUri: vscode.Uri;
   state: {
-    HEAD: { name?: string } | undefined;
+    HEAD: { name?: string; upstream?: { remote: string; name: string } } | undefined;
+    remotes: GitRemote[];
     indexChanges: GitChange[];
     workingTreeChanges: GitChange[];
     untrackedChanges: GitChange[];
@@ -43,6 +56,65 @@ interface GitRepository {
   clean(paths: string[]): Promise<void>;
   commit(message: string): Promise<void>;
   getCommit(ref: string): Promise<{ hash: string }>;
+  push(remoteName?: string, branchName?: string, setUpstream?: boolean): Promise<void>;
+}
+
+/** The remote a branch should go to: its upstream if set, else origin, else the first one. */
+function pickRemote(repo: GitRepository): GitRemote | undefined {
+  const upstream = repo.state.HEAD?.upstream?.remote;
+  const remotes = repo.state.remotes;
+  return (upstream ? remotes.find((r) => r.name === upstream) : undefined) ?? remotes.find((r) => r.name === "origin") ?? remotes[0];
+}
+
+/** `owner/repo` from a GitHub remote URL (https or ssh); undefined for other hosts. */
+function parseGitHubRemote(url: string | undefined): { owner: string; repo: string } | undefined {
+  if (!url) return undefined;
+  const m = /^(?:https?:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url.trim());
+  return m ? { owner: m[1], repo: m[2] } : undefined;
+}
+
+/**
+ * Open (or find) the pull request for `head` with the editor's GitHub sign-in.
+ * Without a signed-in GitHub session we don't prompt from a background relay
+ * command — the phone gets a compare link to finish in the browser instead.
+ */
+async function openPullRequest(target: { owner: string; repo: string }, head: string, args: GitReviewArgs): Promise<GitReviewResult> {
+  const title = args.title!.trim();
+  const session = await vscode.authentication.getSession("github", ["repo"], { silent: true });
+  const compareUrl = `https://github.com/${target.owner}/${target.repo}/compare/${encodeURIComponent(head)}?expand=1&title=${encodeURIComponent(title)}`;
+  if (!session) return { ok: true, url: compareUrl, created: false };
+
+  const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> => {
+    const res = await fetch(`https://api.github.com${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${session.accessToken}`,
+        accept: "application/vnd.github+json",
+        "content-type": "application/json",
+        "user-agent": "celiador-editor",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return { status: res.status, json: await res.json().catch(() => ({})) };
+  };
+
+  const repoPath = `/repos/${target.owner}/${target.repo}`;
+  let base = args.base?.trim();
+  if (!base) {
+    const info = await api("GET", repoPath);
+    base = typeof info.json?.default_branch === "string" ? info.json.default_branch : "main";
+  }
+  const created = await api("POST", `${repoPath}/pulls`, { title, body: args.body ?? "", head, base });
+  if (created.status === 201 && typeof created.json?.html_url === "string") {
+    return { ok: true, url: created.json.html_url, created: true };
+  }
+  // Already open for this branch? Hand back the existing one.
+  const existing = await api("GET", `${repoPath}/pulls?state=open&head=${encodeURIComponent(`${target.owner}:${head}`)}`);
+  if (Array.isArray(existing.json) && typeof existing.json[0]?.html_url === "string") {
+    return { ok: true, url: existing.json[0].html_url, created: false };
+  }
+  const detail = created.json?.errors?.[0]?.message ?? created.json?.message;
+  return { ok: false, error: typeof detail === "string" ? detail : `GitHub returned ${created.status}` };
 }
 interface GitAPI {
   repositories: GitRepository[];
@@ -149,6 +221,25 @@ async function execute(args: GitReviewArgs): Promise<GitReviewResult> {
       // clean() discards: checkout for tracked changes, delete for untracked files.
       await repo.clean(args.paths.map((p) => absPath(repo, p)));
       return { ok: true };
+    }
+    case "git.push": {
+      await repo.status();
+      const branch = repo.state.HEAD?.name;
+      if (!branch) return { ok: false, error: "detached HEAD — check out a branch first" };
+      const remote = pickRemote(repo);
+      if (!remote) return { ok: false, error: "no git remote configured" };
+      await repo.push(remote.name, branch, true);
+      return { ok: true, branch, remote: remote.name };
+    }
+    case "git.pr": {
+      if (!args.title?.trim()) return { ok: false, error: "title is required" };
+      await repo.status();
+      const branch = repo.state.HEAD?.name;
+      if (!branch) return { ok: false, error: "detached HEAD — check out a branch first" };
+      const remote = pickRemote(repo);
+      const target = parseGitHubRemote(remote?.pushUrl ?? remote?.fetchUrl);
+      if (!target) return { ok: false, error: "the branch's remote is not on GitHub" };
+      return openPullRequest(target, branch, args);
     }
   }
 }
