@@ -70,6 +70,18 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private readonly _chatChannelToKey = new Map<string, string>();
 	/** Channels we've already trace-logged as unrouted (avoid per-delta spam). */
 	private readonly _unroutedLogged = new Set<string>();
+	/**
+	 * Chat actions that arrived before their session had a relay client. A NEW
+	 * session dispatches (and echoes) its first `ChatTurnStarted` while the
+	 * provider is still awaiting `sendRequest`; only afterwards is the session
+	 * marked in-progress and added to the model, which is what makes
+	 * {@link _reconcile} create the client. Without this buffer the user's first
+	 * message is dropped and the phone sees an answer with no question
+	 * (Cliefden/daemon#8). Bounded and aged out; replayed by {@link _replayEarlyActions}.
+	 */
+	private _earlyActions: { readonly envelope: ActionEnvelope; readonly at: number }[] = [];
+	private static readonly MAX_EARLY_ACTIONS = 200;
+	private static readonly EARLY_ACTION_TTL_MS = 60_000;
 	/** toolCallId → tool display name (captured at ChatToolCallStart, used to label approvals). */
 	private readonly _toolNameByCallId = new Map<string, string>();
 	/** requestId (= toolCallId) → what a phone approve/deny must dispatch back. */
@@ -175,7 +187,45 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		});
 		this._clients.set(key, client);
 		this._watchSession(key, resource);
+		this._replayEarlyActions(key);
 		return client;
+	}
+
+	/** Remember a chat action whose session has no relay client yet (see {@link _earlyActions}). */
+	private _bufferEarlyAction(envelope: ActionEnvelope): void {
+		const now = Date.now();
+		this._earlyActions = this._earlyActions.filter(entry => now - entry.at <= CeliadorRelayBridge.EARLY_ACTION_TTL_MS);
+		this._earlyActions.push({ envelope, at: now });
+		if (this._earlyActions.length > CeliadorRelayBridge.MAX_EARLY_ACTIONS) {
+			this._earlyActions.splice(0, this._earlyActions.length - CeliadorRelayBridge.MAX_EARLY_ACTIONS);
+		}
+	}
+
+	/** Route buffered early actions that now resolve to the freshly created client, in arrival order. */
+	private _replayEarlyActions(key: string): void {
+		if (this._earlyActions.length === 0) {
+			return;
+		}
+		const now = Date.now();
+		const keep: typeof this._earlyActions = [];
+		const replay: ActionEnvelope[] = [];
+		for (const entry of this._earlyActions) {
+			if (now - entry.at > CeliadorRelayBridge.EARLY_ACTION_TTL_MS) {
+				continue;
+			}
+			if (this._resolveActionKey(entry.envelope.channel.toString()) === key) {
+				replay.push(entry.envelope);
+			} else {
+				keep.push(entry);
+			}
+		}
+		this._earlyActions = keep;
+		if (replay.length > 0) {
+			this._logService.trace(`[celiador-relay] replaying ${replay.length} early action(s) for ${key}`);
+			for (const envelope of replay) {
+				this._onAction(envelope);
+			}
+		}
 	}
 
 	/**
@@ -272,9 +322,16 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		const channel = envelope.channel.toString();
 		const key = this._resolveActionKey(channel);
 		if (!key) {
-			if (this._clients.size > 0 && !this._unroutedLogged.has(channel)) {
+			// A chat action for a session we don't mirror YET (its client is created
+			// once the model reports it in progress) — keep it so the first user turn
+			// and any leading deltas can be replayed. Subagent chats are not mirrored.
+			const parsed = parseChatUri(channel);
+			if (parsed && !parsed.chatId.startsWith('subagent')) {
+				this._bufferEarlyAction(envelope);
+			}
+			if (!this._unroutedLogged.has(channel)) {
 				this._unroutedLogged.add(channel);
-				this._logService.trace(`[celiador-relay] unrouted action channel ${channel} (clients: ${[...this._clients.keys()].join(', ') || 'none'})`);
+				this._logService.trace(`[celiador-relay] unrouted action channel ${channel} (${parsed ? 'buffered' : 'ignored'}; clients: ${[...this._clients.keys()].join(', ') || 'none'})`);
 			}
 			return;
 		}
@@ -582,6 +639,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		this._toolNameByCallId.clear();
 		this._pendingApprovals.clear();
 		this._pendingQuestions.clear();
+		this._earlyActions = [];
 		super.dispose();
 	}
 }
