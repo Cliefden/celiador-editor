@@ -105,10 +105,12 @@ jobs:
           # The runner's launchd session (SessionCreate) can't see the login
           # keychain, so the Developer ID identity lives in a dedicated keychain
           # on this Mac (docs/RELEASING.md); its password is the one secret.
-          KEYCHAIN: ${{ format('{0}/Library/Keychains/celiador-signing.keychain-db', env.HOME) }}
+          # (The path is built in the shell: the runner's HOME is not in the
+          # workflow `env` context, so an expression here would drop it.)
           KEYCHAIN_PASSWORD: ${{ secrets.CELIADOR_SIGNING_KEYCHAIN_PASSWORD }}
         run: |
           set -e
+          KEYCHAIN="$HOME/Library/Keychains/celiador-signing.keychain-db"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           # Make it visible to this session's search list (the login keychain
           # stays listed for the intermediate certificates).
