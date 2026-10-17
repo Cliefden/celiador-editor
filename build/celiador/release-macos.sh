@@ -19,6 +19,7 @@
 # Usage: build/celiador/release-macos.sh [options]
 #   --app <Celiador.app>    default ../VSCode-darwin-arm64/Celiador.app
 #   --identity <name>       default $CELIADOR_SIGN_IDENTITY, else the Developer ID Application identity
+#   --keychain <path>       keychain holding that identity (default $CELIADOR_SIGNING_KEYCHAIN, else the search list)
 #   --out <dir>             default .build/celiador-release
 #   --notes <markdown>      release notes for the manifest entry (or --notes-file <path>)
 #   --skip-notarize         sign + package only — local checks with an Apple Development identity;
@@ -34,6 +35,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 APP="$ROOT/../VSCode-darwin-arm64/Celiador.app"
 IDENTITY="${CELIADOR_SIGN_IDENTITY:-Developer ID Application: Stefan Crafoord-Wiklund (XPNFDWPFAV)}"
+# A dedicated keychain holding the identity (the Actions runner's launchd
+# session cannot see the login keychain); empty = the default search list.
+KEYCHAIN="${CELIADOR_SIGNING_KEYCHAIN:-}"
 OUT="$ROOT/.build/celiador-release"
 NOTES=""
 SKIP_NOTARIZE=0
@@ -48,6 +52,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --app) APP="$2"; shift 2 ;;
     --identity) IDENTITY="$2"; shift 2 ;;
+    --keychain) KEYCHAIN="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
     --notes) NOTES="$2"; shift 2 ;;
     --notes-file) NOTES="$(cat "$2")"; shift 2 ;;
@@ -70,8 +75,14 @@ if [[ $SKIP_NOTARIZE -eq 0 ]]; then
   command -v asc >/dev/null || die "asc not found (brew install asc); or pass --skip-notarize"
   command -v xcrun >/dev/null || die "xcrun not found (Xcode command line tools)"
 fi
-security find-identity -v -p codesigning | grep -qF "$IDENTITY" \
-  || die "signing identity \"$IDENTITY\" is not in the keychain (security find-identity -v -p codesigning)"
+# codesign flags that pin the keychain when one is given (bash 3.2-safe empty-array expansion).
+KC_ARGS=()
+if [[ -n "$KEYCHAIN" ]]; then
+  [[ -f "$KEYCHAIN" ]] || die "signing keychain not found: $KEYCHAIN"
+  KC_ARGS=(--keychain "$KEYCHAIN")
+fi
+security find-identity -v -p codesigning ${KEYCHAIN:+"$KEYCHAIN"} | grep -qF "$IDENTITY" \
+  || die "signing identity \"$IDENTITY\" is not in the keychain (security find-identity -v -p codesigning${KEYCHAIN:+ $KEYCHAIN})"
 if [[ $SKIP_NOTARIZE -eq 0 && "$IDENTITY" != "Developer ID Application:"* ]]; then
   die "notarization needs a Developer ID Application identity, got \"$IDENTITY\" (or pass --skip-notarize)"
 fi
@@ -114,9 +125,9 @@ xattr -cr "$STAGE_APP"
 # signed before the bundle that seals it.
 sign() { # sign <path> [entitlements.plist]
   if [[ -n "${2:-}" ]]; then
-    codesign --force --timestamp --options runtime --entitlements "$2" --sign "$IDENTITY" "$1"
+    codesign --force --timestamp --options runtime --entitlements "$2" --sign "$IDENTITY" ${KC_ARGS[@]+"${KC_ARGS[@]}"} "$1"
   else
-    codesign --force --timestamp --options runtime --sign "$IDENTITY" "$1"
+    codesign --force --timestamp --options runtime --sign "$IDENTITY" ${KC_ARGS[@]+"${KC_ARGS[@]}"} "$1"
   fi
 }
 is_macho() { file -b "$1" | grep -q "Mach-O"; }
@@ -208,7 +219,7 @@ mkdir -p "$DMG_ROOT"
 ditto "$STAGE_APP" "$DMG_ROOT/Celiador.app"
 ln -s /Applications "$DMG_ROOT/Applications"
 hdiutil create -volname "Celiador" -srcfolder "$DMG_ROOT" -ov -format ULFO -quiet "$OUT/$NAME.dmg"
-codesign --force --timestamp --sign "$IDENTITY" "$OUT/$NAME.dmg"
+codesign --force --timestamp --sign "$IDENTITY" ${KC_ARGS[@]+"${KC_ARGS[@]}"} "$OUT/$NAME.dmg"
 if [[ $SKIP_NOTARIZE -eq 0 ]]; then
   log "Notarizing the DMG"
   notarize "$OUT/$NAME.dmg"

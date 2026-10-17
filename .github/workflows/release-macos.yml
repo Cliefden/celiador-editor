@@ -102,8 +102,18 @@ jobs:
       - name: Sign, notarize, package, publish
         env:
           NOTES: ${{ inputs.notes }}
+          # The runner's launchd session (SessionCreate) can't see the login
+          # keychain, so the Developer ID identity lives in a dedicated keychain
+          # on this Mac (docs/RELEASING.md); its password is the one secret.
+          KEYCHAIN: ${{ format('{0}/Library/Keychains/celiador-signing.keychain-db', env.HOME) }}
+          KEYCHAIN_PASSWORD: ${{ secrets.CELIADOR_SIGNING_KEYCHAIN_PASSWORD }}
         run: |
           set -e
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # Make it visible to this session's search list (the login keychain
+          # stays listed for the intermediate certificates).
+          security list-keychains -d user -s "$KEYCHAIN" "$HOME/Library/Keychains/login.keychain-db"
+          export CELIADOR_SIGNING_KEYCHAIN="$KEYCHAIN"
           ARGS=(--out "$RUNNER_TEMP/celiador-release")
           [ -n "$NOTES" ] && ARGS+=(--notes "$NOTES")
           [ "${{ inputs.publish }}" = "true" ] && ARGS+=(--publish)
