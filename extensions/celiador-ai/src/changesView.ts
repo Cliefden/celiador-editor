@@ -1,7 +1,11 @@
-import * as vscode from "vscode";
-import { execFile } from "child_process";
-import * as path from "path";
-import { promisify } from "util";
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+import * as vscode from 'vscode';
+import { execFile } from 'child_process';
+import * as path from 'path';
+import { promisify } from 'util';
 
 const run = promisify(execFile);
 
@@ -17,7 +21,7 @@ interface ChangedFile {
  * side already streams per-run diffs to the companion.
  */
 export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewId = "celiador.changes";
+  public static readonly viewId = 'celiador.changes';
   private view: vscode.WebviewView | undefined;
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -26,15 +30,15 @@ export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.html();
 
     webviewView.webview.onDidReceiveMessage(async (msg) => {
-      if (msg?.type === "refresh") {
+      if (msg?.type === 'refresh') {
         await this.refresh();
-      } else if (msg?.type === "open" && typeof msg.path === "string") {
+      } else if (msg?.type === 'open' && typeof msg.path === 'string') {
         await this.openDiff(msg.path);
       }
     });
 
     webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) void this.refresh();
+      if (webviewView.visible) {void this.refresh();}
     });
     void this.refresh();
   }
@@ -45,28 +49,28 @@ export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
 
   /** Re-read git status and push the file list to the webview. */
   private async refresh(): Promise<void> {
-    if (!this.view) return;
+    if (!this.view) {return;}
     const root = this.workspaceRoot();
     if (!root) {
-      this.view.webview.postMessage({ type: "files", files: [], error: "No folder open." });
+      this.view.webview.postMessage({ type: 'files', files: [], error: 'No folder open.' });
       return;
     }
     try {
-      const { stdout } = await run("git", ["status", "--porcelain=v1"], { cwd: root, maxBuffer: 8 * 1024 * 1024 });
+      const { stdout } = await run('git', ['status', '--porcelain=v1'], { cwd: root, maxBuffer: 8 * 1024 * 1024 });
       const files = parseStatus(stdout);
-      this.view.webview.postMessage({ type: "files", files });
+      this.view.webview.postMessage({ type: 'files', files });
     } catch {
-      this.view.webview.postMessage({ type: "files", files: [], error: "Not a git repository (or git unavailable)." });
+      this.view.webview.postMessage({ type: 'files', files: [], error: 'Not a git repository (or git unavailable).' });
     }
   }
 
   /** Open the file's working-tree change in a diff editor (falls back to opening the file). */
   private async openDiff(rel: string): Promise<void> {
     const root = this.workspaceRoot();
-    if (!root) return;
+    if (!root) {return;}
     const uri = vscode.Uri.file(path.join(root, rel));
     try {
-      await vscode.commands.executeCommand("git.openChange", uri);
+      await vscode.commands.executeCommand('git.openChange', uri);
     } catch {
       await vscode.window.showTextDocument(uri).then(undefined, () => undefined);
     }
@@ -146,20 +150,20 @@ export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
 /** Parse `git status --porcelain=v1` into changed files (new path for renames). */
 function parseStatus(stdout: string): ChangedFile[] {
   const files: ChangedFile[] = [];
-  for (const line of stdout.split("\n")) {
-    if (line.length < 4) continue;
+  for (const line of stdout.split('\n')) {
+    if (line.length < 4) {continue;}
     const status = line.slice(0, 2);
     let p = line.slice(3);
-    const arrow = p.indexOf(" -> "); // rename: "old -> new"
-    if (arrow !== -1) p = p.slice(arrow + 4);
+    const arrow = p.indexOf(' -> '); // rename: "old -> new"
+    if (arrow !== -1) {p = p.slice(arrow + 4);}
     files.push({ status, path: p });
   }
   return files;
 }
 
 function getNonce(): string {
-  let text = "";
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  for (let i = 0; i < 32; i++) text += chars.charAt(Math.floor(Math.random() * chars.length));
+  let text = '';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) {text += chars.charAt(Math.floor(Math.random() * chars.length));}
   return text;
 }

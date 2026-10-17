@@ -1,16 +1,20 @@
-import * as path from "path";
-import Mocha from "mocha";
-import { glob } from "glob";
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+import * as path from 'path';
+import Mocha from 'mocha';
+import { glob } from 'glob';
 
 export async function run(): Promise<void> {
   const mocha = new Mocha({
-    ui: "tdd",
+    ui: 'tdd',
     color: true,
   });
 
-  const testsRoot = path.resolve(__dirname, "..");
+  const testsRoot = path.resolve(__dirname, '..');
 
-  const files = await glob("**/**.test.js", { cwd: testsRoot });
+  const files = await glob('**/**.test.js', { cwd: testsRoot });
 
   files.forEach((f) => mocha.addFile(path.resolve(testsRoot, f)));
 
