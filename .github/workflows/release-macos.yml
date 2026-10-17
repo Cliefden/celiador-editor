@@ -1,67 +1,97 @@
-# Build, sign, notarize and publish the macOS app.
+# Build, sign, notarize and publish the macOS app — the release counterpart of
+# celiador-build.yml's macOS job. Manual only; one run = one published build.
 #
-# NOT YET RUN. This needs a macOS runner and Apple credentials, neither of
-# which existed where it was written, so treat the first run as the test. The
-# steps most likely to need adjustment are called out inline.
-#
-# Required secrets:
-#   MACOS_CERTIFICATE        base64 of the Developer ID Application .p12
-#   MACOS_CERTIFICATE_PWD    password for that .p12
-#   KEYCHAIN_PASSWORD        any value; scopes the temporary keychain
-#   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD   for notarytool
-#   RELEASE_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
-#   RELEASE_CDN_BASE         public base URL the artifacts are served from
+# Runs on the self-hosted Mac runner (scw-mac), where everything the release
+# needs already lives: the Developer ID Application identity in the login
+# keychain, `asc` signed in to App Store Connect (notarization), and ssh access
+# to the box. No repository secrets — see docs/RELEASING.md for the one-time
+# machine setup. The hosted-runner + S3 variant this replaced never ran.
 
 name: Release (macOS)
 
 on:
   workflow_dispatch:
     inputs:
-      productVersion:
-        description: Human-facing version, e.g. 1.138.0
-        required: true
+      notes:
+        description: Release notes (markdown) shown on celiador.ai/releases
+        required: false
+        default: ""
+      publish:
+        description: Publish to celiador.ai (off = build + notarize, upload as a workflow artifact only)
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: macos-14
-    timeout-minutes: 120
+  release:
+    name: macOS (arm64)
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 240
     env:
-      APP: VSCode-darwin-arm64/Celiador.app
-      ARTIFACTS: ${{ github.workspace }}/artifacts
-
+      NPM_ARCH: arm64
+      VSCODE_ARCH: arm64
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
+
+      - name: Restore node_modules cache
+        id: cache-node-modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          key-prefix: celiador-node_modules-macos
+          key-args: "darwin ${{ env.VSCODE_ARCH }} $(node -p process.arch)"
 
       - name: Install dependencies
-        # Native modules compile here, which is why a real Xcode is required.
-        run: npm ci
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          python3 -m pip install --break-system-packages setuptools
+          for i in {1..5}; do
+            npm ci && break
+            if [ $i -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
+            echo "npm ci failed $i, trying again..."
+          done
+        env:
+          npm_config_arch: ${{ env.NPM_ARCH }}
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+          GYP_DEFINES: "kerberos_use_rtld=false"
 
-      - name: Build
-        # buildRoot is the PARENT of the repo, so the app lands outside the
-        # workspace — hence the ../ paths below.
-        run: npm run gulp vscode-darwin-arm64-min
+      - name: Save node_modules cache
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        uses: ./.github/actions/save-node-modules
+
+      - name: Download built-in extensions
+        run: node build/lib/builtInExtensions.ts
+
+      - name: Build app
+        run: npm run gulp vscode-darwin-${{ env.VSCODE_ARCH }}-min
 
       - name: Verify the AI extension actually compiled
-        # The build previously packaged whatever out/ happened to exist. If this
-        # file is missing the app ships with no language model at all, which is
-        # invisible until someone opens chat — so fail loudly here instead.
+        # The build packages whatever out/ exists; without this file the app ships
+        # with no language model at all, invisible until someone opens chat.
         run: |
-          EXT="../$APP/Contents/Resources/app/extensions/celiador-ai/out/extension.js"
+          EXT="../VSCode-darwin-${VSCODE_ARCH}/Celiador.app/Contents/Resources/app/extensions/celiador-ai/out/extension.js"
           test -f "$EXT" || { echo "::error::celiador-ai has no compiled entry point at $EXT"; exit 1; }
 
       - name: Assert no proprietary Copilot code shipped
-        # @github/copilot* and @vscode/copilot-api are GitHub-proprietary and
-        # must stay devDependencies. This is the check that they did.
+        # @github/copilot* and @vscode/copilot-api are GitHub-proprietary and must
+        # stay devDependencies. This is the check that they did.
         run: |
-          APPDIR="../$APP/Contents/Resources/app/node_modules"
+          APPDIR="../VSCode-darwin-${VSCODE_ARCH}/Celiador.app/Contents/Resources/app/node_modules"
           for pkg in @github/copilot @github/copilot-sdk @vscode/copilot-api; do
             if [ -d "$APPDIR/$pkg" ]; then
               echo "::error::$pkg was packaged into the app"; exit 1
@@ -69,114 +99,23 @@ jobs:
           done
           echo "No proprietary Copilot packages in the bundle."
 
-      - name: Import signing certificate
+      - name: Sign, notarize, package, publish
         env:
-          CERT: ${{ secrets.MACOS_CERTIFICATE }}
-          CERT_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-          KEYCHAIN_PWD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          NOTES: ${{ inputs.notes }}
         run: |
-          echo "$CERT" | base64 --decode > /tmp/cert.p12
-          security create-keychain -p "$KEYCHAIN_PWD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PWD" build.keychain
-          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PWD" -T /usr/bin/codesign
-          # Without this, codesign blocks on a UI prompt the runner cannot answer.
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PWD" build.keychain
-          rm -f /tmp/cert.p12
+          set -e
+          ARGS=(--out "$RUNNER_TEMP/celiador-release")
+          [ -n "$NOTES" ] && ARGS+=(--notes "$NOTES")
+          [ "${{ inputs.publish }}" = "true" ] && ARGS+=(--publish)
+          build/celiador/release-macos.sh "${ARGS[@]}"
 
-      - name: Sign
-        env:
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -euo pipefail
-          IDENTITY="Developer ID Application: ${{ secrets.APPLE_DEVELOPER_NAME }} ($TEAM_ID)"
-          ENT=build/azure-pipelines/darwin
-          # Inner-out, never --deep: --deep is deprecated and applies the wrong
-          # entitlements to helpers, which notarization rejects.
-          find "../$APP/Contents/Frameworks" -name "*.dylib" -o -name "*.node" | while read -r f; do
-            codesign --force --timestamp --options runtime --sign "$IDENTITY" "$f"
-          done
-          for helper in "Celiador Helper (GPU)" "Celiador Helper (Plugin)" "Celiador Helper (Renderer)" "Celiador Helper"; do
-            APPPATH="../$APP/Contents/Frameworks/$helper.app"
-            [ -d "$APPPATH" ] || continue
-            case "$helper" in
-              *GPU*)      PLIST="$ENT/helper-gpu-entitlements.plist" ;;
-              *Plugin*)   PLIST="$ENT/helper-plugin-entitlements.plist" ;;
-              *Renderer*) PLIST="$ENT/helper-renderer-entitlements.plist" ;;
-              *)          PLIST="$ENT/helper-entitlements.plist" ;;
-            esac
-            codesign --force --timestamp --options runtime --entitlements "$PLIST" --sign "$IDENTITY" "$APPPATH"
-          done
-          codesign --force --timestamp --options runtime \
-            --entitlements "$ENT/app-entitlements.plist" --sign "$IDENTITY" "../$APP"
-          codesign --verify --strict --verbose=2 "../$APP"
-
-      - name: Notarize and staple
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APP_PWD: ${{ secrets.APPLE_APP_PASSWORD }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$ARTIFACTS"
-          # notarytool takes an archive, not a .app directory.
-          ditto -c -k --keepParent "../$APP" "$ARTIFACTS/notarize.zip"
-          xcrun notarytool submit "$ARTIFACTS/notarize.zip" \
-            --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --password "$APP_PWD" --wait
-          # Staple the .app so Gatekeeper passes offline, then repackage.
-          xcrun stapler staple "../$APP"
-          xcrun stapler validate "../$APP"
-
-      - name: Package DMG and ZIP
-        run: |
-          set -euo pipefail
-          V="${{ inputs.productVersion }}"
-          # Two artifacts, two jobs: the DMG is what a person downloads; the ZIP
-          # is the only thing Squirrel.Mac can apply as an update. Shipping only
-          # a DMG yields an app that installs and then never updates.
-          ditto -c -k --keepParent "../$APP" "$ARTIFACTS/Celiador-darwin-arm64-$V.zip"
-          hdiutil create -volname Celiador -srcfolder "../$APP" -ov -format ULFO \
-            "$ARTIFACTS/Celiador-arm64-$V.dmg"
-          cd "$ARTIFACTS" && shasum -a 256 * > SHA256SUMS && cat SHA256SUMS
-
-      - name: Publish to object storage
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          BUCKET: ${{ secrets.RELEASE_BUCKET }}
-          CDN: ${{ secrets.RELEASE_CDN_BASE }}
-        run: |
-          set -euo pipefail
-          V="${{ inputs.productVersion }}"
-          COMMIT="${{ github.sha }}"
-          ZIP="Celiador-darwin-arm64-$V.zip"
-          DMG="Celiador-arm64-$V.dmg"
-          aws s3 cp "$ARTIFACTS/$ZIP" "s3://$BUCKET/r/$V/$ZIP"
-          aws s3 cp "$ARTIFACTS/$DMG" "s3://$BUCKET/r/$V/$DMG"
-          # The manifest the daemon serves. Written last: until it points at the
-          # new build, nobody is offered an artifact that isn't uploaded yet.
-          cat > "$ARTIFACTS/release.json" <<JSON
-          {
-            "quality": "stable",
-            "platforms": {
-              "darwin-arm64": {
-                "version": "$COMMIT",
-                "productVersion": "$V",
-                "timestamp": $(date +%s000),
-                "url": "$CDN/r/$V/$ZIP",
-                "sha256hash": "$(shasum -a 256 "$ARTIFACTS/$ZIP" | cut -d' ' -f1)",
-                "dmgUrl": "$CDN/r/$V/$DMG"
-              }
-            }
-          }
-          JSON
-          aws s3 cp "$ARTIFACTS/release.json" "s3://$BUCKET/release.json" --cache-control no-cache
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: celiador-macos-${{ inputs.productVersion }}
+          name: celiador-macos-release
           path: |
-            ${{ github.workspace }}/artifacts/*.dmg
-            ${{ github.workspace }}/artifacts/*.zip
-            ${{ github.workspace }}/artifacts/SHA256SUMS
+            ${{ runner.temp }}/celiador-release/*.dmg
+            ${{ runner.temp }}/celiador-release/*.zip
+            ${{ runner.temp }}/celiador-release/*.json
+          if-no-files-found: error
+          retention-days: 14
