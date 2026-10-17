@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { match as globMatch } from '../../../base/common/glob.js';
+
 export const ChatAIDisabledSettingId = 'chat.disableAIFeatures';
 
 /**
@@ -38,7 +40,32 @@ export const ALWAYS_CHECKED_EDIT_PATTERNS: ChatEditAutoApprovePatterns = {
 	'**/.codex/agents/**': false,
 	'**/.codex/config.toml': false,
 	'**/.codex/hooks.json': false,
+	// --- Start Celiador ---
+	// Git hooks run on the next commit/checkout/push; upstream only lists
+	// `.git/**` in the user-overridable defaults. Husky keeps its hooks outside
+	// `.git`, so it needs its own entry.
+	'**/.git/hooks/**': false,
+	'**/.husky/**': false,
+	// --- End Celiador ---
 };
+
+// --- Start Celiador ---
+/**
+ * Whether `fsPath` matches one of the {@link ALWAYS_CHECKED_EDIT_PATTERNS}.
+ * Shared by the agent host's write auto-approval and the Claude SDK
+ * `PreToolUse` hook, so both layers protect exactly the same files. The caller
+ * normalizes the path (`..`, separators) first; `ignoreCase` should follow the
+ * file system (macOS and Windows are case-insensitive).
+ */
+export function isAlwaysCheckedEditPath(fsPath: string, ignoreCase: boolean): boolean {
+	for (const [pattern, approved] of Object.entries(ALWAYS_CHECKED_EDIT_PATTERNS)) {
+		if (approved === false && globMatch(pattern, fsPath, { ignoreCase })) {
+			return true;
+		}
+	}
+	return false;
+}
+// --- End Celiador ---
 
 export const DEFAULT_EDIT_AUTO_APPROVE_PATTERNS: ChatEditAutoApprovePatterns = {
 	'**/*': true,

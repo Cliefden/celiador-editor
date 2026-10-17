@@ -718,10 +718,16 @@ export class SessionPermissionManager extends Disposable {
 		let approved = true;
 		const patterns = this._configService.getRootValue(platformRootSchema, AgentHostEditAutoApprovePatternsConfigKey) ?? DEFAULT_EDIT_AUTO_APPROVE_PATTERNS;
 		const ignoreCase = extUriBiasedIgnorePathCase.ignorePathCasing(resource);
+		// --- Start Celiador ---
+		// Match the normalized path: a literal `.vscode/settings.json/../tasks.json`
+		// must hit `**/.vscode/*.json` even when the symlink-resolved candidate
+		// (which does normalize) is absent because resolution fell back.
+		const fsPath = normalizePath(resource).fsPath;
+		// --- End Celiador ---
 		for (const patternSet of [patterns, ALWAYS_CHECKED_EDIT_PATTERNS]) {
 			for (const [pattern, configuredApproval] of Object.entries(patternSet)) {
 				const isApproved = configuredApproval === true;
-				if (isApproved !== approved && globMatch(pattern, resource.fsPath, { ignoreCase })) {
+				if (isApproved !== approved && globMatch(pattern, fsPath, { ignoreCase })) {
 					approved = isApproved;
 				}
 			}

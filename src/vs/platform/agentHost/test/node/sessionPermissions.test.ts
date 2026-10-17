@@ -309,6 +309,37 @@ suite('SessionPermissionManager', () => {
 		assert.strictEqual(result, undefined);
 	});
 
+	// --- Start Celiador ---
+	test('requires confirmation for protected files reached through dot-dot segments', async () => {
+		const files = [
+			join('src', '..', '.vscode', 'tasks.json'),
+			join('.vscode', 'settings.json', '..', 'tasks.json'),
+			join('docs', '..', '.claude', 'settings.local.json'),
+			join('a', 'b', '..', '..', '.git', 'hooks', 'pre-commit'),
+		];
+		const results = await Promise.all(files.map(file => permissions.getAutoApproval(writeEvent(join(workDir, file)), sessionUri)));
+		assert.deepStrictEqual(results, files.map(() => undefined));
+	});
+
+	test('still auto-approves an ordinary file reached through dot-dot segments', async () => {
+		const result = await permissions.getAutoApproval(writeEvent(join(workDir, 'src', '..', 'src', 'app.ts')), sessionUri);
+		assert.strictEqual(result, ToolCallConfirmationReason.NotNeeded);
+	});
+
+	test('requires confirmation for git and husky hooks even when user patterns approve .git', async () => {
+		configService.updateRootConfig({
+			[AgentHostEditAutoApprovePatternsConfigKey]: mergeChatEditAutoApprovePatterns({ '**/.git/**': true, '**/.husky/**': true }),
+		});
+		const files = [
+			join('.git', 'hooks', 'pre-commit'),
+			join('.git', 'hooks', 'post-checkout.sample'),
+			join('.husky', 'pre-push'),
+		];
+		const results = await Promise.all(files.map(file => permissions.getAutoApproval(writeEvent(join(workDir, file)), sessionUri)));
+		assert.deepStrictEqual(results, files.map(() => undefined));
+	});
+	// --- End Celiador ---
+
 	test('requires confirmation when a symlink redirects outside the working directory', async () => {
 		symlinkSync(outsideDir, join(workDir, 'link'), directoryLinkType);
 		const result = await permissions.getAutoApproval(writeEvent(join(workDir, 'link', 'secret.txt')), sessionUri);
