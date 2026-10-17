@@ -26,10 +26,19 @@ download from celiador.ai, open without a Gatekeeper prompt, and have auto-updat
    security find-identity -v -p codesigning | grep "Developer ID Application"
    ```
 
-   Then open Keychain Access → the private key → Access Control → "Allow all
-   applications" (or add `codesign`), so the runner's launchd service can sign
-   without a UI prompt. Export a `.p12` backup somewhere safe: Developer ID
+   Then let the runner's launchd session use the key. An interactive shell can
+   sign straight after the import, but the Actions runner service gets
+   `errSecInternalComponent` on its first `codesign` until the key's partition
+   list includes Apple's tools (this needs the login password, once):
+
+   ```sh
+   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "<login password>" ~/Library/Keychains/login.keychain-db
+   ```
+
+   Keep a backup of the key and certificate somewhere safe: Developer ID
    certificates cannot be re-downloaded with their key, and only five may exist.
+   (If the certificate was made from an `openssl` CSR, the `.key` + `.cer` files
+   are that backup.)
 
 2. **Notarization credentials.** Already there: `asc` is signed in with the
    App Store Connect API key (`asc auth status`), which the Notary API accepts.
