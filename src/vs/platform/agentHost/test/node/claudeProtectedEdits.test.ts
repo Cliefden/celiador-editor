@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 // --- Start Celiador ---
+import type { PreToolUseHookSpecificOutput } from '@anthropic-ai/claude-agent-sdk';
 import assert from 'assert';
 import { join } from '../../../../base/common/path.js';
 import { isLinux, isWindows } from '../../../../base/common/platform.js';
@@ -21,10 +22,10 @@ suite('claudeProtectedEdits', () => {
 		if (result === undefined) {
 			return undefined;
 		}
-		const output = result.hookSpecificOutput;
+		const output = result.hookSpecificOutput as PreToolUseHookSpecificOutput | undefined;
 		assert.strictEqual(output?.hookEventName, 'PreToolUse');
-		assert.ok(output && 'permissionDecisionReason' in output && output.permissionDecisionReason?.startsWith(CLAUDE_PROTECTED_EDIT_REASON));
-		return output && 'permissionDecision' in output ? output.permissionDecision as 'ask' : undefined;
+		assert.ok(output?.permissionDecisionReason?.startsWith(CLAUDE_PROTECTED_EDIT_REASON));
+		return output?.permissionDecision as 'ask' | undefined;
 	}
 
 	test('forces a prompt for every file-edit tool on an always-checked path, and only there', () => {
