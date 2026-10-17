@@ -108,8 +108,14 @@ jobs:
           # (The path is built in the shell: the runner's HOME is not in the
           # workflow `env` context, so an expression here would drop it.)
           KEYCHAIN_PASSWORD: ${{ secrets.CELIADOR_SIGNING_KEYCHAIN_PASSWORD }}
+          # asc keeps its App Store Connect key in the keychain, which this
+          # session can't read either; hand it the key file on this Mac instead
+          # (complete env credentials take precedence over stored profiles).
+          ASC_KEY_ID: R73AU5822H
+          ASC_ISSUER_ID: 69a6de70-4abf-47e3-e053-5b8c7c11a4d1
         run: |
           set -e
+          export ASC_PRIVATE_KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8"
           KEYCHAIN="$HOME/Library/Keychains/celiador-signing.keychain-db"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           # Make it visible to this session's search list (the login keychain
