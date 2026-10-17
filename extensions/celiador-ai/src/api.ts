@@ -1,4 +1,8 @@
-import type { Auth } from "./auth";
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+import type { Auth } from './auth';
 
 // Thin client for the daemon's app-data endpoints (profile + chat history). The
 // editor talks to the DB THROUGH the daemon — never PostgREST directly. Auth is
@@ -78,10 +82,10 @@ export class DaemonApi {
     const token = await this.auth.getAccessToken();
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
-      Accept: "application/json",
+      Accept: 'application/json',
       ...(init.headers as Record<string, string> | undefined),
     };
-    if (init.body) headers["content-type"] = "application/json";
+    if (init.body) {headers['content-type'] = 'application/json';}
     const res = await fetch(`${this.getUrl()}${path}`, { ...init, headers });
     if (res.status === 401 && retry && (await this.auth.tryRefresh())) {
       return this.call<T>(path, init, false);
@@ -94,15 +98,15 @@ export class DaemonApi {
   }
 
   async getProfile(): Promise<Profile> {
-    return (await this.call<{ profile: Profile }>("/api/profile")).profile;
+    return (await this.call<{ profile: Profile }>('/api/profile')).profile;
   }
 
   async updateProfile(patch: { display_name?: string; settings?: Record<string, unknown> }): Promise<Profile> {
-    return (await this.call<{ profile: Profile }>("/api/profile", { method: "PATCH", body: JSON.stringify(patch) })).profile;
+    return (await this.call<{ profile: Profile }>('/api/profile', { method: 'PATCH', body: JSON.stringify(patch) })).profile;
   }
 
   async listChats(): Promise<ChatSummary[]> {
-    return (await this.call<{ chats: ChatSummary[] }>("/api/chats")).chats;
+    return (await this.call<{ chats: ChatSummary[] }>('/api/chats')).chats;
   }
 
   async getChat(id: string): Promise<{ chat: ChatSummary; messages: ChatMessage[] }> {
@@ -110,15 +114,15 @@ export class DaemonApi {
   }
 
   async deleteChat(id: string): Promise<void> {
-    await this.call(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await this.call(`/api/chats/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   async getMe(): Promise<Me> {
-    return this.call<Me>("/api/me");
+    return this.call<Me>('/api/me');
   }
 
   /** Permanently delete the signed-in account and all its data (DELETE /api/account). */
   async deleteAccount(): Promise<void> {
-    await this.call("/api/account", { method: "DELETE" });
+    await this.call('/api/account', { method: 'DELETE' });
   }
 }

@@ -1,21 +1,25 @@
-import * as vscode from "vscode";
-import { getRestrictedSetting } from "./config";
-import { resolveDaemonUrl } from "./productConfig";
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+import * as vscode from 'vscode';
+import { getRestrictedSetting } from './config';
+import { resolveDaemonUrl } from './productConfig';
 
 // Dependency-free Supabase/GoTrue client for the editor. Supports PKCE-protected
 // OAuth and magic-link flows. Session stored in VS Code SecretStorage, access token
 // refreshed just before expiry. The access_token is sent to the daemon as
 // `Authorization: Bearer` — the shared cross-client auth contract.
 
-const SESSION_KEY = "celiador.session";
+const SESSION_KEY = 'celiador.session';
 /** Refresh this long before the access token expires. */
 const REFRESH_LEAD_SECONDS = 120;
 /** Retry delay after a failed background refresh (e.g. offline). */
 const REFRESH_RETRY_MS = 60_000;
-const PKCE_KEY = "celiador.pkce";
+const PKCE_KEY = 'celiador.pkce';
 // VS Code routes deep links as celiador://<publisher>.<extension><path> to the
 // extension's UriHandler. GoTrue's redirect allowlist must contain this exactly.
-export const AUTH_REDIRECT = "celiador://celiador.celiador-ai/auth-callback";
+export const AUTH_REDIRECT = 'celiador://celiador.celiador-ai/auth-callback';
 
 export interface Session {
   access_token: string;
@@ -27,8 +31,8 @@ export interface Session {
 /** Best-effort email from a JWT payload (no verification — display only). */
 function jwtEmail(token: string): string | undefined {
   try {
-    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
-    return typeof payload.email === "string" ? payload.email : undefined;
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+    return typeof payload.email === 'string' ? payload.email : undefined;
   } catch {
     return undefined;
   }
@@ -55,25 +59,25 @@ export class Auth {
 
   /** Resolve the Supabase base URL + anon key (setting override → /api/config). */
   private async supa(): Promise<{ base: string; anonKey: string }> {
-    if (this.supaConfig) return this.supaConfig;
-    const override = getRestrictedSetting<string>("supabaseUrl", "");
+    if (this.supaConfig) {return this.supaConfig;}
+    const override = getRestrictedSetting<string>('supabaseUrl', '');
     let cfg: any = {};
     try {
-      const res = await fetch(`${this.daemonUrl()}/api/config`, { headers: { Accept: "application/json" } });
-      if (res.ok) cfg = await res.json();
+      const res = await fetch(`${this.daemonUrl()}/api/config`, { headers: { Accept: 'application/json' } });
+      if (res.ok) {cfg = await res.json();}
     } catch {
       /* fall back to daemon URL */
     }
-    const base = (override || cfg.supabaseUrl || this.daemonUrl()).replace(/\/+$/, "");
-    this.supaConfig = { base, anonKey: cfg.supabaseAnonKey || "" };
+    const base = (override || cfg.supabaseUrl || this.daemonUrl()).replace(/\/+$/, '');
+    this.supaConfig = { base, anonKey: cfg.supabaseAnonKey || '' };
     return this.supaConfig;
   }
 
   private async gotrue(pathAndQuery: string, body: unknown): Promise<any> {
     const { base, anonKey } = await this.supa();
     const res = await fetch(`${base}/auth/v1/${pathAndQuery}`, {
-      method: "POST",
-      headers: { "content-type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      method: 'POST',
+      headers: { 'content-type': 'application/json', apikey: anonKey, Authorization: `Bearer ${anonKey}` },
       body: JSON.stringify(body),
     });
     const data: any = await res.json().catch(() => ({}));
@@ -97,12 +101,12 @@ export class Auth {
 
   private async generatePkce(): Promise<{ verifier: string; challenge: string }> {
     const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-      .map(b => b.toString(16).padStart(2, "0"))
-      .join("");
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
     const data = new TextEncoder().encode(verifier);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const challenge = Buffer.from(hashBuffer)
-      .toString("base64url");
+      .toString('base64url');
     return { verifier, challenge };
   }
 
@@ -114,10 +118,10 @@ export class Auth {
   private async consumePkce(): Promise<string | null> {
     const raw = await this.secrets.get(PKCE_KEY);
     await this.secrets.delete(PKCE_KEY);
-    if (!raw) return null;
+    if (!raw) {return null;}
     try {
       const state: PkceState = JSON.parse(raw);
-      if (state.expiresAt < Date.now()) return null;
+      if (state.expiresAt < Date.now()) {return null;}
       return state.verifier;
     } catch {
       return null;
@@ -127,11 +131,11 @@ export class Auth {
   // ---- sign-in methods ------------------------------------------------------
 
   async signInWithPassword(email: string, password: string): Promise<void> {
-    await this.store(this.toSession(await this.gotrue("token?grant_type=password", { email, password })));
+    await this.store(this.toSession(await this.gotrue('token?grant_type=password', { email, password })));
   }
 
   async signUp(email: string, password: string): Promise<boolean> {
-    const data = await this.gotrue("signup", { email, password });
+    const data = await this.gotrue('signup', { email, password });
     if (data.access_token) {
       await this.store(this.toSession(data));
       return true; // email confirmation disabled → immediate session
@@ -145,13 +149,13 @@ export class Auth {
     await this.storePkce(verifier);
     const url = `${base}/auth/v1/otp?redirect_to=${encodeURIComponent(AUTH_REDIRECT)}`;
     const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      method: 'POST',
+      headers: { 'content-type': 'application/json', apikey: anonKey, Authorization: `Bearer ${anonKey}` },
       body: JSON.stringify({ 
         email, 
         create_user: true,
         code_challenge: challenge,
-        code_challenge_method: "s256"
+        code_challenge_method: 's256'
       }),
     });
     if (!res.ok) {
@@ -174,20 +178,20 @@ export class Auth {
     const fragment = new URLSearchParams(uri.fragment);
     
     // Reject implicit flow tokens
-    if (fragment.get("access_token")) {
-      throw new Error("Implicit flow tokens rejected. Use PKCE authorization code flow.");
+    if (fragment.get('access_token')) {
+      throw new Error('Implicit flow tokens rejected. Use PKCE authorization code flow.');
     }
 
-    const code = query.get("code");
-    if (!code) return false;
+    const code = query.get('code');
+    if (!code) {return false;}
 
     const verifier = await this.consumePkce();
     if (!verifier) {
-      throw new Error("No pending sign-in flow (PKCE verifier missing or expired).");
+      throw new Error('No pending sign-in flow (PKCE verifier missing or expired).');
     }
 
     // Exchange authorization code for tokens via PKCE
-    const data = await this.gotrue("token?grant_type=pkce", {
+    const data = await this.gotrue('token?grant_type=pkce', {
       auth_code: code,
       code_verifier: verifier,
     });
@@ -206,10 +210,10 @@ export class Auth {
   }
 
   private async load(): Promise<Session | null> {
-    if (this.cached !== undefined) return this.cached;
+    if (this.cached !== undefined) {return this.cached;}
     const raw = await this.secrets.get(SESSION_KEY);
     this.cached = raw ? (JSON.parse(raw) as Session) : null;
-    if (this.cached) this.scheduleRefresh(this.cached);
+    if (this.cached) {this.scheduleRefresh(this.cached);}
     return this.cached;
   }
 
@@ -220,17 +224,17 @@ export class Auth {
    * through `store`, which fires `onDidChange` and re-forwards the new token.
    */
   private scheduleRefresh(s: Session, delayMs?: number): void {
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    if (this.refreshTimer) {clearTimeout(this.refreshTimer);}
     const dueMs = delayMs ?? Math.max(5_000, (s.expires_at - REFRESH_LEAD_SECONDS) * 1000 - Date.now());
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      if (this.cached !== s) return; // superseded by a newer session or a sign-out
+      if (this.cached !== s) {return;} // superseded by a newer session or a sign-out
       this.refresh(s).catch(() => this.scheduleRefresh(s, REFRESH_RETRY_MS));
     }, dueMs);
   }
 
   async signOut(): Promise<void> {
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    if (this.refreshTimer) {clearTimeout(this.refreshTimer);}
     this.refreshTimer = undefined;
     this.cached = null;
     await this.secrets.delete(SESSION_KEY);
@@ -246,7 +250,7 @@ export class Auth {
   }
 
   private async refresh(s: Session): Promise<Session> {
-    const next = this.toSession(await this.gotrue("token?grant_type=refresh_token", { refresh_token: s.refresh_token }));
+    const next = this.toSession(await this.gotrue('token?grant_type=refresh_token', { refresh_token: s.refresh_token }));
     await this.store(next);
     return next;
   }
@@ -254,7 +258,7 @@ export class Auth {
   /** Force a refresh (used after a daemon 401). Returns false if not signed in. */
   async tryRefresh(): Promise<boolean> {
     const s = await this.load();
-    if (!s) return false;
+    if (!s) {return false;}
     try {
       await this.refresh(s);
       return true;
@@ -266,7 +270,7 @@ export class Auth {
   /** A valid access token, refreshing within 60s of expiry. Throws if signed out. */
   async getAccessToken(): Promise<string> {
     let s = await this.load();
-    if (!s) throw new Error("Not signed in.");
+    if (!s) {throw new Error('Not signed in.');}
     if (s.expires_at - Math.floor(Date.now() / 1000) < 60) {
       s = await this.refresh(s);
     }

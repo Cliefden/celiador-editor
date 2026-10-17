@@ -1,6 +1,10 @@
-import * as vscode from "vscode";
-import { Auth } from "./auth";
-import type { DaemonApi, Me } from "./api";
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+import * as vscode from 'vscode';
+import { Auth } from './auth';
+import type { DaemonApi, Me } from './api';
 
 /**
  * The Celiador welcome/account pane — always visible in the Celiador sidebar.
@@ -13,7 +17,7 @@ import type { DaemonApi, Me } from "./api";
  * one-click into the Agents Window, and account management (sign out, delete).
  */
 export class CeliadorWelcomeViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewId = "celiador.welcome";
+  public static readonly viewId = 'celiador.welcome';
   private view: vscode.WebviewView | undefined;
 
   constructor(private readonly auth: Auth, private readonly api: DaemonApi) {}
@@ -25,19 +29,19 @@ export class CeliadorWelcomeViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage((msg) => {
       switch (msg?.type) {
-        case "signIn": void vscode.commands.executeCommand("celiador.signIn"); break;
-        case "openAgents": void this.openAgentsWindow(); break;
-        case "pastChats": void vscode.commands.executeCommand("celiador.pastChats"); break;
-        case "signOut": void vscode.commands.executeCommand("celiador.signOut"); break;
-        case "deleteAccount": void vscode.commands.executeCommand("celiador.deleteAccount"); break;
-        case "refresh": void this.render(); break;
+        case 'signIn': void vscode.commands.executeCommand('celiador.signIn'); break;
+        case 'openAgents': void this.openAgentsWindow(); break;
+        case 'pastChats': void vscode.commands.executeCommand('celiador.pastChats'); break;
+        case 'signOut': void vscode.commands.executeCommand('celiador.signOut'); break;
+        case 'deleteAccount': void vscode.commands.executeCommand('celiador.deleteAccount'); break;
+        case 'refresh': void this.render(); break;
       }
     });
 
     const sub = this.auth.onDidChange(() => void this.render());
     webviewView.onDidDispose(() => sub.dispose());
     webviewView.onDidChangeVisibility(() => {
-      if (webviewView.visible) void this.render();
+      if (webviewView.visible) {void this.render();}
     });
     void this.render();
   }
@@ -45,28 +49,28 @@ export class CeliadorWelcomeViewProvider implements vscode.WebviewViewProvider {
   /** Push sign-in state (fast), then the usage summary (a daemon round-trip) when signed in. */
   private async render(): Promise<void> {
     const view = this.view;
-    if (!view) return;
+    if (!view) {return;}
     const signedIn = await this.auth.isSignedIn();
     const email = signedIn ? await this.auth.currentEmail() : undefined;
-    if (this.view !== view) return;
-    view.webview.postMessage({ type: "state", signedIn, email });
-    if (!signedIn) return;
+    if (this.view !== view) {return;}
+    view.webview.postMessage({ type: 'state', signedIn, email });
+    if (!signedIn) {return;}
     let me: Me | null = null;
     try {
       me = await this.api.getMe();
     } catch {
       me = null; // daemon unreachable or endpoint absent — panel shows "usage unavailable"
     }
-    if (this.view !== view) return;
-    view.webview.postMessage({ type: "usage", me });
+    if (this.view !== view) {return;}
+    view.webview.postMessage({ type: 'usage', me });
   }
 
   /** Open the native Agents Window; fall back to the command palette if unavailable. */
   private async openAgentsWindow(): Promise<void> {
     try {
-      await vscode.commands.executeCommand("workbench.action.openAgentsWindow");
+      await vscode.commands.executeCommand('workbench.action.openAgentsWindow');
     } catch {
-      void vscode.window.showInformationMessage("Open the Agents Window from the command palette (⌘⇧A).");
+      void vscode.window.showInformationMessage('Open the Agents Window from the command palette (⌘⇧A).');
     }
   }
 
@@ -221,8 +225,8 @@ export class CeliadorWelcomeViewProvider implements vscode.WebviewViewProvider {
 }
 
 function getNonce(): string {
-  let text = "";
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  for (let i = 0; i < 32; i++) text += chars.charAt(Math.floor(Math.random() * chars.length));
+  let text = '';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) {text += chars.charAt(Math.floor(Math.random() * chars.length));}
   return text;
 }

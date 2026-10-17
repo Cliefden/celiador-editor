@@ -1,5 +1,9 @@
-import * as vscode from "vscode";
-import type { Auth } from "./auth";
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+import * as vscode from 'vscode';
+import type { Auth } from './auth';
 
 /**
  * A VS Code authentication provider that exposes the extension's Supabase session
@@ -15,11 +19,11 @@ import type { Auth } from "./auth";
  * (`celiador.signIn`); this provider only surfaces the resulting session.
  */
 
-export const CELIADOR_AUTH_PROVIDER_ID = "celiador";
-const CELIADOR_AUTH_PROVIDER_LABEL = "Celiador";
-const SESSION_ID = "celiador-supabase-session";
+export const CELIADOR_AUTH_PROVIDER_ID = 'celiador';
+const CELIADOR_AUTH_PROVIDER_LABEL = 'Celiador';
+const SESSION_ID = 'celiador-supabase-session';
 /** Context key for `when` clauses (e.g. the Get Started walkthrough's sign-in step). */
-const SIGNED_IN_CONTEXT_KEY = "celiador.signedIn";
+const SIGNED_IN_CONTEXT_KEY = 'celiador.signedIn';
 
 export class CeliadorAuthProvider implements vscode.AuthenticationProvider, vscode.Disposable {
 	private readonly _onDidChangeSessions = new vscode.EventEmitter<vscode.AuthenticationProviderAuthenticationSessionsChangeEvent>();
@@ -37,7 +41,7 @@ export class CeliadorAuthProvider implements vscode.AuthenticationProvider, vsco
 	}
 
 	private _setSignedInContext(signedIn: boolean): void {
-		void vscode.commands.executeCommand("setContext", SIGNED_IN_CONTEXT_KEY, signedIn);
+		void vscode.commands.executeCommand('setContext', SIGNED_IN_CONTEXT_KEY, signedIn);
 	}
 
 	private async _fireChange(): Promise<void> {
@@ -67,7 +71,7 @@ export class CeliadorAuthProvider implements vscode.AuthenticationProvider, vsco
 			this._lastSession = undefined;
 			return [];
 		}
-		const email = (await this.auth.currentEmail()) ?? "Celiador account";
+		const email = (await this.auth.currentEmail()) ?? 'Celiador account';
 		const session: vscode.AuthenticationSession = {
 			id: SESSION_ID,
 			accessToken,
@@ -80,12 +84,12 @@ export class CeliadorAuthProvider implements vscode.AuthenticationProvider, vsco
 
 	async createSession(_scopes: readonly string[]): Promise<vscode.AuthenticationSession> {
 		if (!(await this.auth.isSignedIn())) {
-			await vscode.commands.executeCommand("celiador.signIn");
+			await vscode.commands.executeCommand('celiador.signIn');
 			await this._waitForSignIn(120_000);
 		}
 		const sessions = await this.getSessions(_scopes);
 		if (sessions.length === 0) {
-			throw new Error("Celiador sign-in was not completed.");
+			throw new Error('Celiador sign-in was not completed.');
 		}
 		return sessions[0];
 	}
