@@ -239,6 +239,14 @@ task.task(transpileExtensionsTask);
 export const compileExtensionsTask = task.define('compile-extensions', task.parallel(...tasks.map(t => t.compileTask)));
 task.task(compileExtensionsTask);
 
+// --- Start Celiador ---
+// The bundled celiador-ai extension is a plain tsc extension (no esbuild
+// config), so the packaging stream copies whatever `out/` it finds instead of
+// building it. The platform build tasks run this first so a clean checkout
+// (CI) ships the extension and a local build never ships a stale `out/`.
+export const compileCeliadorExtensionTask = tasks[compilations.indexOf('extensions/celiador-ai/tsconfig.json')].compileTask;
+// --- End Celiador ---
+
 export const watchExtensionsTask = task.define('watch-extensions', task.parallel(...tasks.map(t => t.watchTask)));
 task.task(watchExtensionsTask);
 
