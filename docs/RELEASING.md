@@ -26,14 +26,27 @@ download from celiador.ai, open without a Gatekeeper prompt, and have auto-updat
    security find-identity -v -p codesigning | grep "Developer ID Application"
    ```
 
-   Then let the runner's launchd session use the key. An interactive shell can
-   sign straight after the import, but the Actions runner service gets
-   `errSecInternalComponent` on its first `codesign` until the key's partition
-   list includes Apple's tools (this needs the login password, once):
+   **The runner needs its own keychain.** The Actions runner is a launchd
+   service started with `SessionCreate`, so it runs in a security session that
+   does not see the login keychain at all: its first `codesign` fails with
+   `errSecInternalComponent` whatever the key's ACL says. The identity therefore
+   also lives in `~/Library/Keychains/celiador-signing.keychain-db`, a keychain
+   with its own password that the workflow unlocks from the repository secret
+   `CELIADOR_SIGNING_KEYCHAIN_PASSWORD`. To (re)create it from the key and
+   certificate files:
 
    ```sh
-   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "<login password>" ~/Library/Keychains/login.keychain-db
+   security create-keychain -p "<new password>" ~/Library/Keychains/celiador-signing.keychain-db
+   security set-keychain-settings ~/Library/Keychains/celiador-signing.keychain-db   # never auto-lock
+   security import developer-id.key -k ~/Library/Keychains/celiador-signing.keychain-db -P "" -T /usr/bin/codesign -T /usr/bin/security
+   security import developerID_application.cer -k ~/Library/Keychains/celiador-signing.keychain-db
+   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "<new password>" ~/Library/Keychains/celiador-signing.keychain-db
+   security list-keychains -d user -s ~/Library/Keychains/celiador-signing.keychain-db ~/Library/Keychains/login.keychain-db
+   gh secret set CELIADOR_SIGNING_KEYCHAIN_PASSWORD --repo Cliefden/celiador --body "<new password>"
    ```
+
+   Locally, `release-macos.sh` finds the identity through the search list; pass
+   `--keychain` (or `CELIADOR_SIGNING_KEYCHAIN`) to pin it the way the workflow does.
 
    Keep a backup of the key and certificate somewhere safe: Developer ID
    certificates cannot be re-downloaded with their key, and only five may exist.
