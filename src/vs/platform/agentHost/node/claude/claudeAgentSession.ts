@@ -30,6 +30,7 @@ import { PendingMessage, ChatInputAnswer, ChatInputRequest, ChatInputResponseKin
 import type { ClientPluginCustomization, CustomizationEnablement } from '../../common/state/protocol/channels-session/state.js';
 import { CustomizationType, parseRequiredSessionUriFromChatUri, type Customization, type ToolCallResult } from '../../common/state/sessionState.js';
 import { IClaudeAgentSdkService } from './claudeAgentSdkService.js';
+import { getClaudeProtectedEditDecision } from './claudeProtectedEdits.js';
 import { buildClientMcpServers, buildOptions, toClaudeMcpServers, type ClaudeDeniedMcpServerSpec } from './claudeSdkOptions.js';
 import { claudeTransportForProvider, parseClaudeModelSelection, toClaudeSdkModelId } from './claudeModelSelection.js';
 import { buildServerToolMcpServer, CLAUDE_SERVER_TOOL_MCP_SERVER_NAME, serverToolAllowList } from './claudeServerToolMcpServer.js';
@@ -670,7 +671,7 @@ export class ClaudeAgentSession extends Disposable {
 				telemetry,
 				traceContext,
 				getUserPromptAdditionalContext: () => this._hostInstructions?.join('\n\n'),
-				onPreToolUse: (toolName, input) => this._restrictAgentMergeGitHubTool(toolName, input),
+				onPreToolUse: (toolName, input, cwd) => this._preToolUse(toolName, input, cwd),
 			},
 			ctx.transport,
 			data => this._logService.error(`[Claude SDK stderr] ${data}`),
@@ -789,7 +790,7 @@ export class ClaudeAgentSession extends Disposable {
 						telemetry,
 						traceContext,
 						getUserPromptAdditionalContext: () => this._hostInstructions?.join('\n\n'),
-						onPreToolUse: (toolName, input) => this._restrictAgentMergeGitHubTool(toolName, input),
+						onPreToolUse: (toolName, input, cwd) => this._preToolUse(toolName, input, cwd),
 					},
 					rebuildTransport,
 					data => this._logService.error(`[Claude SDK stderr] ${data}`),
@@ -1103,6 +1104,19 @@ export class ClaudeAgentSession extends Disposable {
 			this._agentMergeTurn = false;
 		}
 	}
+
+	// --- Start Celiador ---
+	/**
+	 * The session's single SDK `PreToolUse` decision: the Agent Merge
+	 * restriction first (a hard deny), then the protected-edit prompt (an
+	 * `ask` that survives `acceptEdits` / `bypassPermissions`; see
+	 * {@link getClaudeProtectedEditDecision}).
+	 */
+	private _preToolUse(toolName: string, input: unknown, cwd: string | undefined): SyncHookJSONOutput | undefined {
+		return this._restrictAgentMergeGitHubTool(toolName, input)
+			?? getClaudeProtectedEditDecision(toolName, input, cwd ?? this.workingDirectory?.fsPath);
+	}
+	// --- End Celiador ---
 
 	private _restrictAgentMergeGitHubTool(toolName: string, input: unknown): SyncHookJSONOutput | undefined {
 		const externalMcpTool = toolName.startsWith('mcp__') && !toolName.startsWith(`mcp__${CLAUDE_SERVER_TOOL_MCP_SERVER_NAME}__`);

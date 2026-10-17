@@ -55,7 +55,8 @@ export interface IBuildOptionsInput {
 	readonly permissionMode: ClaudePermissionMode;
 	readonly canUseTool: NonNullable<Options['canUseTool']>;
 	readonly onElicitation: OnElicitation;
-	readonly onPreToolUse?: (toolName: string, input: unknown) => SyncHookJSONOutput | undefined;
+	/** `cwd` is the SDK's working directory for the call (Celiador: used to absolutize edit paths). */
+	readonly onPreToolUse?: (toolName: string, input: unknown, cwd?: string) => SyncHookJSONOutput | undefined;
 	readonly isResume: boolean;
 	/**
 	 * One-shot SDK assistant-message uuid to resume *up to and including*
@@ -165,7 +166,7 @@ export async function buildOptions(
 		hooks.PreToolUse = [{
 			hooks: [async hookInput => {
 				const preToolUse = hookInput as PreToolUseHookInput;
-				return input.onPreToolUse?.(preToolUse.tool_name, preToolUse.tool_input) ?? {};
+				return input.onPreToolUse?.(preToolUse.tool_name, preToolUse.tool_input, preToolUse.cwd) ?? {};
 			}],
 		}];
 	}
