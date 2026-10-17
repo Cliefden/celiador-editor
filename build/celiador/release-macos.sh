@@ -84,6 +84,15 @@ read -r COMMIT VERSION QUALITY BUILD_TS < <(node -e '
   console.log(p.commit, p.version, p.quality || "stable", ts);
 ' "$PRODUCT")
 [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "product.json has no commit (is this a gulp -min build?)"
+# The bundled celiador-ai extension is a plain tsc extension: the build packages
+# its compiled out/. Refuse an app that has none, or one older than the
+# extension's sources (a stale out/ was packaged), rather than ship an editor
+# with no AI layer or an outdated one.
+EXT_JS="$APP/Contents/Resources/app/extensions/celiador-ai/out/extension.js"
+[[ -f "$EXT_JS" ]] || die "the app has no compiled celiador-ai extension at $EXT_JS — rebuild with gulp (it compiles the extension since the fix/build-compiles-celiador-ai change)"
+if [[ -n "$(find "$ROOT/extensions/celiador-ai/src" -type f -newer "$EXT_JS" -print -quit)" ]]; then
+  die "the packaged celiador-ai extension is older than its sources — rebuild before releasing"
+fi
 SHORT="${COMMIT:0:7}"
 NAME="Celiador-$PLATFORM-$VERSION-$SHORT"
 log "Releasing Celiador $VERSION ($SHORT, $QUALITY) from $APP"

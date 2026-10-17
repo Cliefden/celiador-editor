@@ -78,6 +78,15 @@ exercises everything but Apple: the inner-out signing order, the entitlements,
 the packaging and the manifest merge. The result runs on this Mac but Gatekeeper
 rejects it elsewhere, and `--publish` refuses it.
 
+## The bundled extension is compiled by the build
+
+`celiador-ai` is a plain tsc extension; the packaging stream copies its `out/`
+rather than building it. The platform build task therefore runs
+`compile-extension:celiador-ai` first (a Celiador change in `build/gulpfile.vscode.ts`),
+so a clean checkout ships the extension and a local build never ships a stale
+`out/`. The release script refuses an app whose packaged extension is missing or
+older than `extensions/celiador-ai/src`, and the workflow has the same check.
+
 ## Why not `codesign --deep`
 
 `--deep` is deprecated and applies the outer entitlements to every nested
