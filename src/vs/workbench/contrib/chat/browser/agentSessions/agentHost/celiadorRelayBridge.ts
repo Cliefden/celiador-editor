@@ -20,6 +20,7 @@ import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputResponseKind, 
 import { buildDefaultChatUri, isDefaultChatUri, parseChatUri, SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
+import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
 import { IAuthenticationService } from '../../../../../services/authentication/common/authentication.js';
 import { IChatService } from '../../../common/chatService/chatService.js';
@@ -27,6 +28,19 @@ import { ChatSessionStatus } from '../../../common/chatSessionsService.js';
 import { isAgentHostTarget } from '../agentSessions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
 import { CeliadorRelayClient, IRelayGitArgs, RelayFsKind, RelayGitKind } from './celiadorRelayClient.js';
+
+type PhoneCommandClassification = {
+	command: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Which steering command the companion phone sent: cancel, approve, reject, instruct, answer, fs.*, git.*.' };
+	owner: 'celiador';
+	comment: 'A command from the Celiador companion phone reached the editor relay bridge.';
+};
+type PhoneCommandEvent = {
+	command: string;
+};
+type SessionMirroredClassification = {
+	owner: 'celiador';
+	comment: 'A local agent session started being mirrored to the companion phone.';
+};
 
 /**
  * Celiador: editor-as-runner relay bridge. Mirrors each live local agent-host
@@ -102,6 +116,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		@IFileService private readonly _fileService: IFileService,
 		@IWorkspaceContextService private readonly _workspaceService: IWorkspaceContextService,
 		@ICommandService private readonly _commandService: ICommandService,
+		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 	) {
 		super();
 		// Accessing `.model` lazily resolves all session providers; its change event
@@ -178,17 +193,23 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			getUrl: () => this._daemonUrl(),
 			getToken: () => this._token(),
 			log: message => this._logService.trace(`[celiador-relay] ${message}`),
-			onCancel: () => { void this._chatService.cancelCurrentRequestForSession(resource, 'celiador-phone'); },
-			onApprovalDecision: (requestId, approved) => this._resolveApproval(requestId, approved),
-			onInstruct: (text) => this._sendInstruction(key, text),
-			onAnswer: (requestId, text) => this._answerQuestion(requestId, text),
-			onFsCommand: (kind, requestId, path, content) => { void this._handleFsCommand(key, kind, requestId, path, content); },
-			onGitCommand: (kind, requestId, args) => { void this._handleGitCommand(key, kind, requestId, args); },
+			onCancel: () => { this._trackPhoneCommand('cancel'); void this._chatService.cancelCurrentRequestForSession(resource, 'celiador-phone'); },
+			onApprovalDecision: (requestId, approved) => { this._trackPhoneCommand(approved ? 'approve' : 'reject'); this._resolveApproval(requestId, approved); },
+			onInstruct: (text) => { this._trackPhoneCommand('instruct'); this._sendInstruction(key, text); },
+			onAnswer: (requestId, text) => { this._trackPhoneCommand('answer'); this._answerQuestion(requestId, text); },
+			onFsCommand: (kind, requestId, path, content) => { this._trackPhoneCommand(kind); void this._handleFsCommand(key, kind, requestId, path, content); },
+			onGitCommand: (kind, requestId, args) => { this._trackPhoneCommand(kind); void this._handleGitCommand(key, kind, requestId, args); },
 		});
 		this._clients.set(key, client);
 		this._watchSession(key, resource);
 		this._replayEarlyActions(key);
+		this._telemetryService.publicLog2<{}, SessionMirroredClassification>('celiador/relaySessionMirrored');
 		return client;
+	}
+
+	/** Product telemetry: which steering commands the phone actually uses (no content, no ids). */
+	private _trackPhoneCommand(command: string): void {
+		this._telemetryService.publicLog2<PhoneCommandEvent, PhoneCommandClassification>('celiador/phoneCommand', { command });
 	}
 
 	/** Remember a chat action whose session has no relay client yet (see {@link _earlyActions}). */

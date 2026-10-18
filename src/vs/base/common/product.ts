@@ -207,6 +207,12 @@ export interface IProductConfiguration {
 	readonly aiConfig?: {
 		readonly ariaKey: string;
 	};
+	/** Celiador: product telemetry via TelemetryDeck; inert while `appId` is empty. */
+	readonly telemetryDeck?: {
+		readonly appId: string;
+		readonly salt?: string;
+		readonly target?: string;
+	};
 
 	readonly documentationUrl?: string;
 	readonly serverDocumentationUrl?: string;
