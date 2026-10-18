@@ -43,6 +43,20 @@ const glob = promisify(globCallback);
 const rcedit = promisify(rceditCallback);
 const root = path.dirname(import.meta.dirname);
 const commit = getVersion(root);
+// --- Start Celiador ---
+// A human-facing build number: the commit count on the built branch. Monotonic,
+// needs no bookkeeping commit, and survives upstream rebases (which only add
+// history). Stamped into product.json next to commit/date; shown in About and
+// carried into the release manifest by build/celiador/release-macos.sh.
+const celiadorBuild: number | undefined = (() => {
+	try {
+		const count = Number(cp.execSync('git rev-list --count HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim());
+		return Number.isInteger(count) && count > 0 ? count : undefined;
+	} catch {
+		return undefined;
+	}
+})();
+// --- End Celiador ---
 // Celiador: the package-lock version lookup that lived here only served the
 // Copilot About-dialog versions, removed with that extension.
 
@@ -325,6 +339,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 		const productJsonStream = gulp.src(['product.json'], { base: '.' })
 			.pipe(jsonEditor((json: Record<string, unknown>) => {
 				json.commit = commit;
+				json.celiadorBuild = celiadorBuild; // Celiador
 				json.date = readISODate(out);
 				json.checksums = checksums;
 				json.version = version;

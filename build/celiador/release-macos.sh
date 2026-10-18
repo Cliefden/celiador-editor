@@ -89,11 +89,16 @@ fi
 
 # ── What we're releasing: the app's own product.json is the source of truth ────
 PRODUCT="$APP/Contents/Resources/app/product.json"
-read -r COMMIT VERSION QUALITY BUILD_TS < <(node -e '
+read -r COMMIT VERSION QUALITY BUILD_TS BUILD_NO < <(node -e '
   const p = require(process.argv[1]);
   const ts = Date.parse(p.date || "") || Date.now();
-  console.log(p.commit, p.version, p.quality || "stable", ts);
+  console.log(p.commit, p.version, p.quality || "stable", ts, p.celiadorBuild || "-");
 ' "$PRODUCT")
+# Human-facing version for the feed/site: the VS Code version plus the build
+# number the gulp build stamped (commit count), since the version alone repeats
+# across releases. "-" means an app built before the build number existed.
+PRODUCT_VERSION="$VERSION"
+[[ "$BUILD_NO" != "-" ]] && PRODUCT_VERSION="$VERSION (build $BUILD_NO)"
 [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "product.json has no commit (is this a gulp -min build?)"
 # The bundled celiador-ai extension is a plain tsc extension: the build packages
 # its compiled out/. Refuse an app that has none, or one older than the
@@ -106,7 +111,7 @@ if [[ -n "$(find "$ROOT/extensions/celiador-ai/src" -type f -newer "$EXT_JS" -pr
 fi
 SHORT="${COMMIT:0:7}"
 NAME="Celiador-$PLATFORM-$VERSION-$SHORT"
-log "Releasing Celiador $VERSION ($SHORT, $QUALITY) from $APP"
+log "Releasing Celiador $PRODUCT_VERSION ($SHORT, $QUALITY) from $APP"
 echo "    identity: $IDENTITY"
 echo "    out:      $OUT"
 
@@ -236,7 +241,7 @@ echo "    $NAME.dmg  $DMG_SHA"
 # ── Manifest: this build's entry, merged into the current published manifest ─
 log "Writing manifest"
 CURRENT="$(curl -fsS --max-time 20 "$MANIFEST_URL" 2>/dev/null || echo '{"releases":[]}')"
-CURRENT="$CURRENT" NOTES="$NOTES" node - "$OUT" "$NAME" "$PLATFORM" "$QUALITY" "$COMMIT" "$VERSION" "$BUILD_TS" "$ZIP_SHA" "$DMG_SHA" "$SHORT" <<'JS'
+CURRENT="$CURRENT" NOTES="$NOTES" node - "$OUT" "$NAME" "$PLATFORM" "$QUALITY" "$COMMIT" "$PRODUCT_VERSION" "$BUILD_TS" "$ZIP_SHA" "$DMG_SHA" "$SHORT" <<'JS'
 const fs = require("fs");
 const [out, name, platform, quality, version, productVersion, ts, zipSha, dmgSha, short] = process.argv.slice(2);
 const entry = {

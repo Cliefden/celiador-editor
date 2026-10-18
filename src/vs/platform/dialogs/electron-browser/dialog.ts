@@ -21,6 +21,11 @@ export function createNativeAboutDialogDetails(productService: IProductService, 
 	} else if (productService.darwinUniversalAssetId) {
 		version = `${version} (Universal)`;
 	}
+	// --- Start Celiador ---
+	if (productService.celiadorBuild) {
+		version = `${version} (build ${productService.celiadorBuild})`;
+	}
+	// --- End Celiador ---
 
 	const copilotRuntimeVersion = formatCopilotVersion(productService.copilotVersions?.runtime);
 	const copilotSdkVersion = formatCopilotVersion(productService.copilotVersions?.sdk);
