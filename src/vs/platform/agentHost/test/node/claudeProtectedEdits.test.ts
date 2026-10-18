@@ -84,5 +84,63 @@ suite('claudeProtectedEdits', () => {
 			assert.deepStrictEqual(results, { upperVscode: 'ask', upperClaude: 'ask', upperHooks: 'ask' });
 		});
 	}
+
+	test('guards git config and workspace files, which carry hooks and settings too', () => {
+		const results = {
+			gitConfig: decision('Edit', { file_path: join(cwd, '.git', 'config') }),
+			workspaceFile: decision('Write', { file_path: join(cwd, 'celiador.code-workspace') }),
+			gitIndex: decision('Write', { file_path: join(cwd, '.git', 'index') }),
+		};
+		assert.deepStrictEqual(results, { gitConfig: 'ask', workspaceFile: 'ask', gitIndex: undefined });
+	});
+
+	suite('symlinks', () => {
+		// A repo can ship `build -> .vscode` and `cfg -> <outside>/.claude`; the
+		// target files need not exist yet (the agent is about to create them).
+		const existing = new Set([cwd, join(cwd, 'src'), join(cwd, '.vscode')]);
+		const links = new Map([
+			[join(cwd, 'build'), join(cwd, '.vscode')],
+			[join(cwd, 'cfg'), isWindows ? 'C:\\elsewhere\\.claude' : '/elsewhere/.claude'],
+		]);
+		const enoent = () => Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+		const fakeRealpath = (fsPath: string): string => {
+			const linked = links.get(fsPath);
+			if (linked) {
+				return linked;
+			}
+			if (existing.has(fsPath)) {
+				return fsPath;
+			}
+			throw enoent();
+		};
+
+		function linkedDecision(toolName: string, input: unknown): 'ask' | undefined {
+			const result = getClaudeProtectedEditDecision(toolName, input, cwd, fakeRealpath);
+			const output = result?.hookSpecificOutput as PreToolUseHookSpecificOutput | undefined;
+			return output?.permissionDecision as 'ask' | undefined;
+		}
+
+		test('sees through a symlinked directory, even for a file that does not exist yet', () => {
+			const results = {
+				viaLinkIntoVscode: linkedDecision('Write', { file_path: join(cwd, 'build', 'tasks.json') }),
+				viaLinkOutsideRepo: linkedDecision('Write', { file_path: join('cfg', 'settings.json') }),
+				viaLinkOrdinaryFile: linkedDecision('Write', { file_path: join(cwd, 'build', 'notes.txt') }),
+				plainSource: linkedDecision('Write', { file_path: join(cwd, 'src', 'app.ts') }),
+			};
+			assert.deepStrictEqual(results, {
+				viaLinkIntoVscode: 'ask',
+				viaLinkOutsideRepo: 'ask',
+				viaLinkOrdinaryFile: undefined,
+				plainSource: undefined,
+			});
+		});
+
+		test('still prompts for the literal path when nothing on the way resolves', () => {
+			const broken = (): string => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); };
+			const result = getClaudeProtectedEditDecision('Write', { file_path: join(cwd, '.vscode', 'tasks.json') }, cwd, broken);
+			const output = result?.hookSpecificOutput as PreToolUseHookSpecificOutput | undefined;
+			assert.strictEqual(output?.permissionDecision, 'ask');
+		});
+	});
 });
 // --- End Celiador ---

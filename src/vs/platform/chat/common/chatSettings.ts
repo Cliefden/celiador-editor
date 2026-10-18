@@ -46,6 +46,12 @@ export const ALWAYS_CHECKED_EDIT_PATTERNS: ChatEditAutoApprovePatterns = {
 	// `.git`, so it needs its own entry.
 	'**/.git/hooks/**': false,
 	'**/.husky/**': false,
+	// `.git/config` can point hooks anywhere (`core.hooksPath`) or run a command
+	// on every status (`core.fsmonitor`), so guarding `.git/hooks` alone is not
+	// enough. A `.code-workspace` file carries settings and tasks exactly like
+	// `.vscode/*.json` does.
+	'**/.git/config': false,
+	'**/*.code-workspace': false,
 	// --- End Celiador ---
 };
 

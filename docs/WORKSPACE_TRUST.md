@@ -66,3 +66,30 @@ fail closed.
 - Bash is not path-aware: `echo > .vscode/tasks.json` is governed by the shell
   rules (`sed -i` and redirects to denied destinations require confirmation),
   not by the edit patterns.
+
+## Follow-up (2026-10-18, closing editor#22)
+
+A second pass against the list above found two gaps and closed them.
+
+- **The SDK hook now resolves symlinks.** The host's auto-approval already
+  matched the symlink-resolved real path, but the `PreToolUse` hook only
+  matched the literal, normalized path — and in `acceptEdits` the hook is the
+  only gate, so a repository shipping `build -> .vscode` could have the agent
+  write `build/tasks.json` without a prompt. `claudeProtectedEdits.ts` now
+  resolves the path the same way the host does (walking up to the nearest
+  existing ancestor for a file about to be created) and prompts if either the
+  literal or the resolved path is always-checked. When nothing on the way can
+  be resolved (permissions, odd file systems) the literal path still decides.
+  Tests fake the symlink so the behaviour is pinned without touching disk.
+- **`.git/config` and `*.code-workspace` are always-checked.** Guarding
+  `.git/hooks` alone was not enough: `.git/config` can point hooks anywhere
+  (`core.hooksPath`) or run a command on every `git status`
+  (`core.fsmonitor`). A `.code-workspace` file carries `settings` and `tasks`
+  exactly like `.vscode/*.json`. Both were only in the user-overridable
+  defaults before.
+
+Checked and left as is: Workspace Trust defaults (enabled; Restricted Mode
+first, by design, commit b049a8623ca), the agent-host trust gate, and "Run on
+your editor" — the phone can only start a run for a repository this window
+already has open, so trust was decided by the user at the keyboard. Still out
+of scope, as above: `bypassPermissions` ("Allow All") and shell redirects.
