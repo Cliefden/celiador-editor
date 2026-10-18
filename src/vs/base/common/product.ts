@@ -101,6 +101,8 @@ export interface IProductConfiguration {
 	readonly date?: string;
 	readonly quality?: string;
 	readonly commit?: string;
+	/** Celiador: monotonic build number stamped by the build (commit count on the branch). */
+	readonly celiadorBuild?: number;
 
 	readonly nameShort: string;
 	readonly nameLong: string;
