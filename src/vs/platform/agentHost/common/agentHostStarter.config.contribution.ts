@@ -124,7 +124,7 @@ configurationRegistry.registerConfiguration({
 		},
 		[AgentMergeSettingId.AddressReviews]: {
 			type: 'boolean',
-			description: nls.localize('chat.agentMerge.addressReviews', "Controls whether enabled Agent Merge sessions address unresolved review threads, changes-requested reviews, and new pull request comments from repository maintainers or the Copilot pull request reviewer."),
+			description: nls.localize('chat.agentMerge.addressReviews', "Controls whether enabled Agent Merge sessions address unresolved review threads, changes-requested reviews, and new pull request comments from repository maintainers or an automated pull request reviewer."),
 			default: true,
 			scope: ConfigurationScope.APPLICATION,
 			tags: ['experimental', AGENT_MERGE_SETTING_TAG],
@@ -221,7 +221,7 @@ configurationRegistry.registerConfiguration({
 		},
 		[AgentHostSystemProxyEnabledSettingId]: {
 			type: 'boolean',
-			description: nls.localize('chat.agentHost.systemProxy.enabled', "When enabled, Copilot sessions automatically discover and use the operating system's proxy configuration when no proxy environment variable is set."),
+			description: nls.localize('chat.agentHost.systemProxy.enabled', "When enabled, agent sessions automatically discover and use the operating system's proxy configuration when no proxy environment variable is set."),
 			default: true,
 			tags: ['experimental', 'advanced'],
 			experiment: { mode: 'startup' },
@@ -276,7 +276,7 @@ configurationRegistry.registerConfiguration({
 				localization: {
 					description: {
 						key: 'chat.agentHost.claudeAgent.enabled.policy',
-						value: nls.localize('chat.agentHost.claudeAgent.enabled.policy', "Enable Claude Agent sessions in VS Code. Start and resume agentic coding sessions powered by Anthropic Claude Agent SDK directly in the editor. Uses your existing Copilot subscription."),
+						value: nls.localize('chat.agentHost.claudeAgent.enabled.policy', "Enable Claude Agent sessions. Start and resume agentic coding sessions powered by the Anthropic Claude Agent SDK directly in the editor, through your Celiador account."),
 					}
 				}
 			},
@@ -310,7 +310,7 @@ configurationRegistry.registerConfiguration({
 				localization: {
 					description: {
 						key: 'chat.agentHost.codexAgent.enabled.policy',
-						value: nls.localize('chat.agentHost.codexAgent.enabled.policy', "Enable Codex Agent sessions in VS Code. Start and resume agentic coding sessions powered by OpenAI Codex. Usage can be routed through GitHub Copilot or authenticated directly with an OpenAI account."),
+						value: nls.localize('chat.agentHost.codexAgent.enabled.policy', "Enable Codex Agent sessions. Start and resume agentic coding sessions powered by OpenAI Codex, authenticated directly with an OpenAI account."),
 					}
 				}
 			},
