@@ -313,7 +313,7 @@ class TerminalInitialHintWidget extends Disposable {
 				disposables: this._toDispose
 			};
 			hintElement.appendChild(renderFormattedText(copilotCliHint, { actionHandler: copilotCliHintHandler }));
-			ariaLabelParts.push(localize('copilotCliHintAriaLabel', "Type copilot to use Copilot CLI."));
+			ariaLabelParts.push(localize('copilotCliHintAriaLabel', "Press Command+I to ask the Celiador agent for a command."));
 		}
 
 		// Suggest hint - only shown when AI features are hidden (otherwise the Copilot CLI hint takes precedence)
