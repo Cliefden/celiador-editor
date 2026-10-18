@@ -99,6 +99,10 @@ read -r COMMIT VERSION QUALITY BUILD_TS BUILD_NO < <(node -e '
 # across releases. "-" means an app built before the build number existed.
 PRODUCT_VERSION="$VERSION"
 [[ "$BUILD_NO" != "-" ]] && PRODUCT_VERSION="$VERSION (build $BUILD_NO)"
+# A shallow checkout counts one commit; refuse to publish a build labelled that way.
+if [[ "$BUILD_NO" != "-" && "$BUILD_NO" -lt 1000 ]]; then
+  die "build number $BUILD_NO is implausibly small — the app was built from a shallow checkout (fetch full history, then rebuild)"
+fi
 [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "product.json has no commit (is this a gulp -min build?)"
 # The bundled celiador-ai extension is a plain tsc extension: the build packages
 # its compiled out/. Refuse an app that has none, or one older than the
