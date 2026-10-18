@@ -8,7 +8,8 @@
 // executes behind an explicit user approval, whatever the SDK permission mode.
 
 import type { SyncHookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
-import { isAbsolute, normalize, resolve } from '../../../../base/common/path.js';
+import { realpathSync } from 'fs';
+import { basename, dirname, isAbsolute, join, normalize, resolve } from '../../../../base/common/path.js';
 import { isLinux } from '../../../../base/common/platform.js';
 import { isAlwaysCheckedEditPath } from '../../../chat/common/chatSettings.js';
 import { getClaudeToolPath, isClaudeFileEditTool } from './claudeToolDisplay.js';
@@ -18,6 +19,38 @@ import { getClaudeToolPath, isClaudeFileEditTool } from './claudeToolDisplay.js'
  * Exported so tests and the docs can refer to the one string.
  */
 export const CLAUDE_PROTECTED_EDIT_REASON = 'This file can change what the editor or the agent executes, so it always needs your approval';
+
+/** Synchronous `realpath`; injectable so tests can fake a symlink. */
+export type RealPathSync = (fsPath: string) => string;
+
+/**
+ * Resolve symlinks in `fsPath`, walking up to the nearest existing ancestor
+ * when the file (or its parents) does not exist yet — the synchronous twin of
+ * the host's `resolveRealPathForNonexistent`, so a symlinked directory is
+ * followed even for a file the agent is about to create. Returns `fsPath`
+ * unchanged when nothing on the way can be resolved.
+ */
+export function resolveRealPathSync(fsPath: string, realpath: RealPathSync = realpathSync): string {
+	const tail: string[] = [];
+	let current = fsPath;
+	for (;;) {
+		try {
+			const resolved = realpath(current);
+			return tail.length ? join(resolved, ...tail) : resolved;
+		} catch (e) {
+			const code = (e as NodeJS.ErrnoException).code;
+			if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+				return fsPath;
+			}
+		}
+		const parent = dirname(current);
+		if (parent === current) {
+			return fsPath;
+		}
+		tail.unshift(basename(current));
+		current = parent;
+	}
+}
 
 /**
  * SDK `PreToolUse` decision for file-edit tools that target an
@@ -36,11 +69,15 @@ export const CLAUDE_PROTECTED_EDIT_REASON = 'This file can change what the edito
  *
  * `cwd` is the SDK's reported working directory, used to absolutize a
  * relative path before matching. `..` segments are normalized so
- * `src/../.vscode/tasks.json` is seen as what it is. Matching is case-
- * insensitive on macOS and Windows (APFS and NTFS are), like the host.
- * Returns `undefined` for everything else, so the next hook decides.
+ * `src/../.vscode/tasks.json` is seen as what it is, and symlinks are
+ * resolved so `build/tasks.json` with `build -> .vscode` is too — the hook
+ * is the only gate in `acceptEdits`, so it must see through the same tricks
+ * the host does. Both the literal and the resolved path are matched.
+ * Matching is case-insensitive on macOS and Windows (APFS and NTFS are),
+ * like the host. Returns `undefined` for everything else, so the next hook
+ * decides.
  */
-export function getClaudeProtectedEditDecision(toolName: string, input: unknown, cwd?: string): SyncHookJSONOutput | undefined {
+export function getClaudeProtectedEditDecision(toolName: string, input: unknown, cwd?: string, realpath: RealPathSync = realpathSync): SyncHookJSONOutput | undefined {
 	if (!isClaudeFileEditTool(toolName)) {
 		return undefined;
 	}
@@ -50,14 +87,16 @@ export function getClaudeProtectedEditDecision(toolName: string, input: unknown,
 	}
 	const absolute = isAbsolute(rawPath) ? rawPath : cwd ? resolve(cwd, rawPath) : rawPath;
 	const normalized = normalize(absolute);
-	if (!isAlwaysCheckedEditPath(normalized, !isLinux)) {
+	const resolved = normalize(resolveRealPathSync(normalized, realpath));
+	const protectedPath = [normalized, resolved].find(candidate => isAlwaysCheckedEditPath(candidate, !isLinux));
+	if (!protectedPath) {
 		return undefined;
 	}
 	return {
 		hookSpecificOutput: {
 			hookEventName: 'PreToolUse',
 			permissionDecision: 'ask',
-			permissionDecisionReason: `${CLAUDE_PROTECTED_EDIT_REASON}: ${normalized}`,
+			permissionDecisionReason: `${CLAUDE_PROTECTED_EDIT_REASON}: ${protectedPath}`,
 		},
 	};
 }
