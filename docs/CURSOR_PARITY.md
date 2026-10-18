@@ -42,7 +42,12 @@ app**, not just the dev build; each phase ships independently.
   sets, external terminal title, locale action, `/vscode-pet`); Beginner walkthrough no
   longer links to Settings Sync or aka.ms. Kept by decision: the `github` built-in
   (Publish to GitHub, git auth).
-- **Remaining:** a Celiador `documentationUrl` (needs a docs page on celiador.ai —
+- **Done, third batch (2026-10-18):** `product.json` help URLs (`documentationUrl` → celiador.ai/docs,
+  release notes → /changelog, privacy, request-feature; `defaultChatAgent` URLs off aka.ms); settings
+  descriptions for the agent host no longer say Copilot (Copilot-harness-only settings keep their
+  accurate text on purpose); update/extension-update descriptions name celiador.ai / Open VSX; the
+  Workspace Trust walkthrough step links celiador.ai/docs#workspace-trust. **Phase 1 complete.**
+- **Previously remaining (now done):** a Celiador `documentationUrl` (needed a docs page on celiador.ai —
   `/docs` is 404); settings descriptions that mention Copilot/Microsoft (bulk sweep);
   the Workspace Trust walkthrough step still links to code.visualstudio.com docs.
 
