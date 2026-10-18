@@ -101,6 +101,7 @@ import { PolicyChannelClient } from '../../../platform/policy/common/policyIpc.j
 import { IPolicyService, NullPolicyService } from '../../../platform/policy/common/policy.js';
 import { UserDataProfilesService } from '../../../platform/userDataProfile/common/userDataProfileIpc.js';
 import { OneDataSystemAppender } from '../../../platform/telemetry/node/1dsAppender.js';
+import { TelemetryDeckAppender } from '../../../platform/telemetry/node/telemetryDeckAppender.js';
 import { UserDataProfilesCleaner } from './contrib/userDataProfilesCleaner.js';
 import { IRemoteTunnelService } from '../../../platform/remoteTunnel/common/remoteTunnel.js';
 import { UserDataSyncResourceProviderService } from '../../../platform/userDataSync/common/userDataSyncResourceProvider.js';
@@ -336,6 +337,21 @@ class SharedProcessMain extends Disposable implements IClientConnectionFilter {
 				const collectorAppender = new OneDataSystemAppender(requestService, internalTelemetry, 'monacoworkbench', null, productService.aiConfig.ariaKey);
 				this._register(toDisposable(() => collectorAppender.flush())); // Ensure the 1DS appender is disposed so that it flushes remaining data
 				appenders.push(collectorAppender);
+			}
+			// Celiador: TelemetryDeck is the product's collector (allowlisted events only,
+			// hashed machine id). Inert until product.json carries an app id.
+			if (!isLoggingOnly(productService, environmentService) && productService.telemetryDeck?.appId) {
+				const telemetryDeckAppender = this._register(new TelemetryDeckAppender({
+					appId: productService.telemetryDeck.appId,
+					salt: productService.telemetryDeck.salt,
+					target: productService.telemetryDeck.target,
+					machineId: this.configuration.machineId,
+					appVersion: productService.version,
+					commit: productService.commit,
+					isTestMode: productService.quality !== 'stable',
+				}, requestService, logService));
+				this._register(toDisposable(() => telemetryDeckAppender.flush()));
+				appenders.push(telemetryDeckAppender);
 			}
 
 			telemetryService = new TelemetryService({

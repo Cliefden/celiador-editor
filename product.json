@@ -42,6 +42,11 @@
 	"documentationUrl": "https://celiador.ai/docs",
 	"releaseNotesUrl": "https://celiador.ai/changelog",
 	"privacyStatementUrl": "https://celiador.ai/privacy",
+	"enableTelemetry": true,
+	"telemetryDeck": {
+		"appId": "",
+		"salt": "celiador-editor"
+	},
 	"nodejsArtifactFeed": "",
 	"electronArtifactFeed": "",
 	"urlProtocol": "celiador",

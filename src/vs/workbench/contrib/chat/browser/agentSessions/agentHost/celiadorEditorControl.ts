@@ -11,11 +11,21 @@ import { ICommandService } from '../../../../../../platform/commands/common/comm
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
+import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
 import { IAuthenticationService } from '../../../../../services/authentication/common/authentication.js';
 import { SessionType } from '../../../common/chatSessionsService.js';
 import { normalizeToHttps, parseRemoteUrl } from './celiadorWorkspacePresence.js';
+
+type PhoneRunClassification = {
+	seeded: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Whether the phone sent a first prompt with the run request or opened an idle chat.' };
+	owner: 'celiador';
+	comment: 'The companion phone started a run on this editor via "Run on your editor".';
+};
+type PhoneRunEvent = {
+	seeded: boolean;
+};
 
 /**
  * Celiador: the editor end of "Run on your editor". The companion phone asks the
@@ -55,6 +65,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		@IFileService private readonly _fileService: IFileService,
 		@IProductService private readonly _productService: IProductService,
 		@ILogService private readonly _logService: ILogService,
+		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 	) {
 		super();
 		this._register(toDisposable(() => this._abort.abort()));
@@ -145,6 +156,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			const sendOptions = cmd.prompt && cmd.prompt.trim() ? { prompt: cmd.prompt } : undefined;
 			await this._commandService.executeCommand(CeliadorEditorControl.OPEN_SESSION_COMMAND, 'sidebar', sendOptions);
 			this._logService.trace(`[celiador-control] started a run for ${cmd.name ?? cmd.remoteUrl}`);
+			this._telemetryService.publicLog2<PhoneRunEvent, PhoneRunClassification>('celiador/phoneRun', { seeded: !!sendOptions });
 		} catch (e) {
 			this._handled.delete(cmd.requestId);
 			this._logService.trace(`[celiador-control] failed to start a run: ${e}`);
