@@ -44,7 +44,7 @@
 	"privacyStatementUrl": "https://celiador.ai/privacy",
 	"enableTelemetry": true,
 	"telemetryDeck": {
-		"appId": "",
+		"appId": "F1064ED9-9413-4478-8753-20DC53104F78",
 		"salt": "celiador-editor"
 	},
 	"nodejsArtifactFeed": "",
