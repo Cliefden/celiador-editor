@@ -131,6 +131,9 @@ import './contrib/debug/electron-browser/extensionHostDebugService.js';
 import './contrib/extensions/electron-browser/extensions.contribution.js';
 import './contrib/extensions/electron-browser/devtoolsExtensionHost.contribution.js';
 
+// Celiador: import settings/keybindings/extensions from Cursor or VS Code
+import './contrib/celiadorImport/electron-browser/celiadorImport.contribution.js';
+
 // Issues
 import './contrib/issue/electron-browser/issue.contribution.js';
 
