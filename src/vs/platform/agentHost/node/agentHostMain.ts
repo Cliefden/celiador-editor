@@ -24,13 +24,15 @@ import { IAgentConfigurationService } from './agentConfigurationService.js';
 import { IAgentHostCompletions } from './agentHostCompletions.js';
 import { ClaudeAgent } from './claude/claudeAgent.js';
 import { ClaudeSdkPackage } from './claude/claudeAgentSdkService.js';
-import { CodexAgent, CodexSdkPackage } from './codex/codexAgent.js';
+import { CodexAgent } from './codex/codexAgent.js';
+import { CodexSdkPackage } from './codex/codexSdk.js';
 import { createCodexProviderConfiguration } from './codex/codexProviderConfiguration.js';
 import { ByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
 import { IAgentHostProxyResolver } from './agentHostProxyResolver.js';
 import { IAgentSdkDownloader, type IAgentSdkDownloadProgress } from './agentSdkDownloader.js';
 import { IAgentHostProviderService } from './agentHostProviderService.js';
 import { ProtocolServerHandler } from './protocolServerHandler.js';
+import { MissionControlHost } from './missionControl/missionControlHost.js';
 import { WebSocketProtocolServer } from './webSocketTransport.js';
 import { MessagePortProtocolServer } from './messagePortProtocolServer.js';
 import { cleanupLocalAgentHostEndpointMetadataSync, cleanupLocalAgentHostEndpointSocketSync, createLocalAgentHostEndpointMetadata, prepareLocalAgentHostEndpointMetadataDirectory, prepareLocalAgentHostEndpointSocketDirectory, publishLocalAgentHostEndpointMetadata, type ILocalAgentHostEndpointMetadata } from './localAgentHostMetadata.js';
@@ -58,6 +60,7 @@ import { join } from '../../../base/common/path.js';
 import ErrorTelemetry from '../../telemetry/node/errorTelemetry.js';
 import { ITelemetryService } from '../../telemetry/common/telemetry.js';
 import { AgentHostLaunchKindEnvVar, readAgentHostLaunchKind, type AgentHostLaunchKind } from '../common/agentHostTelemetry.js';
+import { markNodeCompileCacheReady } from '../../../base/node/nodeCompileCache.js';
 
 // Entry point for the agent host utility process.
 // Sets up IPC, logging, and registers agent providers (Copilot).
@@ -70,13 +73,7 @@ void startAgentHost().catch(err => {
 });
 
 async function startAgentHost(): Promise<void> {
-	// Setup RPC - supports both Electron utility process and Node child process
-	let server: ChildProcessServer<string> | UtilityProcessServer;
-	if (isUtilityProcess(process)) {
-		server = new UtilityProcessServer();
-	} else {
-		server = new ChildProcessServer(AgentHostIpcChannels.AgentHost);
-	}
+	const utilityProcessServer = isUtilityProcess(process) ? new UtilityProcessServer() : undefined;
 
 	const disposables = new DisposableStore();
 	const protocolIngressDisposables = disposables.add(new DisposableStore());
@@ -88,7 +85,8 @@ async function startAgentHost(): Promise<void> {
 	const environmentService = new NativeEnvironmentService(parseArgs(process.argv, OPTIONS), productService);
 	const loggerService = new LoggerService(getLogLevel(environmentService), environmentService.logsHome);
 	// Non-protocol management and logging IPC remain separate from the AHP data plane.
-	server.registerChannel(AgentHostIpcChannels.Logger, new LoggerChannel(loggerService, () => DefaultURITransformer));
+	const loggerChannel = new LoggerChannel(loggerService, () => DefaultURITransformer);
+	utilityProcessServer?.registerChannel(AgentHostIpcChannels.Logger, loggerChannel);
 	const logger = loggerService.createLogger('agenthost', { name: localize('agentHost', "Agent Host") });
 	// OTLP log fan-out: any consumer that subscribes to the host's
 	// `ahp-otlp://logs/{level}` channel will receive every log record this
@@ -127,6 +125,8 @@ async function startAgentHost(): Promise<void> {
 			hostLaunchKind,
 			providerConfigurations: [createCodexProviderConfiguration(environmentService.userHome, process.env[AgentHostCodexAgentCodexHomeEnvVar])],
 			byok: { kind: 'renderer', bridgeRegistry: byokLmBridgeRegistry },
+			// On-device models run only in this local utility-process host, never in agentHostServerMain.
+			localModel: { kind: 'localUtilityProcess' },
 		});
 		disposables.add(runtime);
 		agentService = runtime.agentService;
@@ -145,7 +145,6 @@ async function startAgentHost(): Promise<void> {
 		fileService = runtimeServices.fileService;
 		proxyResolver = runtimeServices.proxyResolver;
 		stateManager = runtimeServices.stateManager;
-		completionTriggerCharacters = runtimeServices.completions.triggerCharacters;
 		errorTelemetry.value = new ErrorTelemetry(runtimeServices.telemetryService);
 		const agentSdkDownloader = runtimeServices.agentSdkDownloader;
 		const providerService = runtimeServices.providerService;
@@ -191,6 +190,7 @@ async function startAgentHost(): Promise<void> {
 			registerCodexIfEnabled();
 			disposables.add(agentConfigurationService.onDidRootConfigChange(registerCodexIfEnabled));
 		}
+		completionTriggerCharacters = runtimeServices.completions.triggerCharacters;
 	} catch (err) {
 		logService.error('Failed to create AgentService', err);
 		disposables.dispose();
@@ -223,9 +223,13 @@ async function startAgentHost(): Promise<void> {
 		)));
 	}
 
+	// The child-process IPC handshake must wait until runtime initialization can no longer delay channel registration.
+	const server = utilityProcessServer ?? new ChildProcessServer(AgentHostIpcChannels.AgentHost);
+
 	// Retain the imperative bridge only for the child-process server consumers.
 	// The utility-process MessagePort exposes Protocol and Management instead.
 	if (!(server instanceof UtilityProcessServer)) {
+		server.registerChannel(AgentHostIpcChannels.Logger, loggerChannel);
 		const agentChannel = ProxyChannel.fromService(agentService, disposables);
 		server.registerChannel(AgentHostIpcChannels.AgentHost, agentChannel);
 	}
@@ -315,8 +319,6 @@ async function startAgentHost(): Promise<void> {
 			const localEndpoint = await startLocalAgentHostEndpoint(
 				environmentService.userDataPath,
 				logService,
-				instantiationService,
-				environmentService.logsHome,
 			);
 			if (localEndpoint) {
 				const endpointMetadata = localEndpoint.metadata;
@@ -373,7 +375,6 @@ async function startAgentHost(): Promise<void> {
 			const wsServer = await WebSocketProtocolServer.create(
 				{ socketPath },
 				logService,
-				{ instantiationService, logsHome: environmentService.logsHome },
 			);
 			if (protocolIngressDisposables.isDisposed) {
 				wsServer.dispose();
@@ -449,15 +450,33 @@ async function startAgentHost(): Promise<void> {
 			}
 		},
 	};
-	server.registerChannel(AgentHostIpcChannels.Management, ProxyChannel.fromService(instantiationService.createInstance(
+	const missionControl = protocolIngressDisposables.add(instantiationService.createInstance(MissionControlHost, {
+		hostLaunchKind,
+		clientFileSystemProvider,
+		trackProtocolHandler: handler => {
+			protocolHandlers.push(handler);
+			return toDisposable(() => {
+				protocolHandlers.splice(protocolHandlers.indexOf(handler), 1);
+				handler.dispose();
+			});
+		},
+	}));
+	const management = instantiationService.createInstance(
 		AgentHostManagementService,
 		agentService,
 		connectionTrackerService,
 		async () => {
+			try {
+				await missionControl.environment.configure(undefined);
+			} catch (error) {
+				logService.error('[AgentHost] Failed to unregister Mission Control environment', error);
+			}
 			protocolIngressDisposables.dispose();
 			await Promise.all(protocolHandlers.map(handler => handler.whenIdle()));
 		},
-	), disposables));
+	);
+	management.setMissionControl(missionControl.environment);
+	server.registerChannel(AgentHostIpcChannels.Management, ProxyChannel.fromService(management, disposables));
 	if (!(server instanceof UtilityProcessServer)) {
 		server.registerChannel(AgentHostIpcChannels.ConnectionTracker, ProxyChannel.fromService(connectionTrackerService, disposables));
 	}
@@ -470,7 +489,6 @@ async function startAgentHost(): Promise<void> {
 		completionTriggerCharacters,
 		clientFileSystemProvider,
 		instantiationService,
-		environmentService.logsHome,
 		logService,
 		otlpLogEmitter,
 		protocolIngressDisposables,
@@ -482,10 +500,13 @@ async function startAgentHost(): Promise<void> {
 	// Startup is complete once the last ingress has settled — successfully or
 	// not, since a failed WebSocket server is non-fatal. Deferred maintenance
 	// then runs after a client has also been served its first session listing.
+	let startupOutcome: 'success' | 'error' = 'success';
 	void configuredWebSocketServerStart.catch(err => {
+		startupOutcome = 'error';
 		logService.error('Failed to start WebSocket server', err);
 	}).finally(() => {
-		agentService.markStartupComplete();
+		agentService.markStartupComplete(startupOutcome);
+		markNodeCompileCacheReady(message => logService.info(message));
 	});
 
 	process.once('exit', () => {
@@ -502,8 +523,6 @@ interface ILocalAgentHostEndpoint {
 async function startLocalAgentHostEndpoint(
 	userDataPath: string,
 	logService: ILogService,
-	instantiationService: IInstantiationService,
-	logsHome: URI,
 ): Promise<ILocalAgentHostEndpoint | undefined> {
 	let metadata: ILocalAgentHostEndpointMetadata | undefined;
 	let server: WebSocketProtocolServer | undefined;
@@ -520,7 +539,6 @@ async function startLocalAgentHostEndpoint(
 				connectionTokenValidate: token => token === endpointMetadata.connectionToken,
 			},
 			logService,
-			{ instantiationService, logsHome },
 		);
 		await server.whenListening;
 		return { metadata: endpointMetadata, server };
@@ -567,7 +585,6 @@ async function startWebSocketServer(
 	completionTriggerCharacters: readonly string[],
 	clientFileSystemProvider: AgentHostClientFileSystemProvider,
 	instantiationService: IInstantiationService,
-	logsHome: URI,
 	logService: ILogService,
 	otlpLogEmitter: OtlpLogEmitter,
 	disposables: DisposableStore,
@@ -601,7 +618,6 @@ async function startWebSocketServer(
 					: undefined,
 			},
 		logService,
-		{ instantiationService, logsHome },
 	);
 	if (disposables.isDisposed) {
 		wsServer.dispose();

@@ -17,7 +17,7 @@ import { IAgentSubscription } from '../../../../../../platform/agentHost/common/
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
 import { ActionEnvelope, ChatInputCompletedAction, ChatPendingMessageSetAction, ChatToolCallConfirmedAction, ChatTurnStartedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
 import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputResponseKind, MessageKind, PendingMessageKind, ToolCallCancellationReason, ToolCallConfirmationReason } from '../../../../../../platform/agentHost/common/state/protocol/channels-chat/state.js';
-import { buildDefaultChatUri, isDefaultChatUri, parseChatUri, SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
+import { buildDefaultChatUri, parseChatUri, SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
@@ -274,8 +274,9 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 						next.add(chat.resource.toString());
 					}
 				}
+				// Upstream no longer derives the default chat from its URI shape; the
+				// host advertises it as `defaultChat`.
 				primary = state.defaultChat?.toString()
-					?? state.chats?.find(chat => isDefaultChatUri(chat.resource))?.resource?.toString()
 					?? state.chats?.[0]?.resource?.toString();
 			}
 			watch.primary = primary;
@@ -330,9 +331,13 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		if (!parsed || parsed.chatId.startsWith('subagent')) {
 			return undefined;
 		}
-		for (const candidate of candidates(parsed.session)) {
-			if (this._clients.has(candidate)) {
-				return candidate;
+		// Chat URIs no longer expose their owning session (upstream is moving them
+		// to opaque ids). Until the state watch above maps the channel, match it
+		// against the default chat URI each mirrored session would have minted.
+		for (const key of this._clients.keys()) {
+			const protocolSession = key.startsWith(LOCAL_AGENT_HOST_SCHEME_PREFIX) ? key.slice(LOCAL_AGENT_HOST_SCHEME_PREFIX.length) : key;
+			if (channel === buildDefaultChatUri(protocolSession) || channel === buildDefaultChatUri(key)) {
+				return key;
 			}
 		}
 		return undefined;

@@ -118,6 +118,7 @@ export interface IProductConfiguration {
 	readonly win32VersionedUpdate?: boolean;
 	readonly win32ContextMenu?: { readonly [arch: string]: { readonly clsid: string } };
 	readonly applicationName: string;
+	readonly linuxDesktopName?: string;
 	readonly embedderIdentifier?: string;
 	readonly agentsTelemetryAppName?: string;
 
@@ -136,6 +137,8 @@ export interface IProductConfiguration {
 	readonly webviewContentExternalBaseUrlTemplate?: string;
 	readonly target?: string;
 	readonly nlsCoreBaseUrl?: string;
+	/** Build-time hash of the commit and core NLS tables used to identify translated-message caches. */
+	readonly nlsMetadataHash?: string;
 
 	readonly settingsSearchBuildId?: number;
 	readonly settingsSearchUrl?: string;
@@ -179,6 +182,11 @@ export interface IProductConfiguration {
 	readonly trustedExtensionPublishers?: readonly string[];
 
 	readonly extensionRecommendations?: IStringDictionary<IExtensionRecommendations>;
+	readonly connectorRecommendations?: IStringDictionary<{
+		readonly name: string;
+		readonly description: string;
+		readonly iconUrl: string;
+	}>;
 	readonly configBasedExtensionTips?: IStringDictionary<IConfigBasedExtensionTip>;
 	readonly exeBasedExtensionTips?: IStringDictionary<IExeBasedExtensionTip>;
 	readonly remoteExtensionTips?: IStringDictionary<IRemoteExtensionTip>;
@@ -463,6 +471,7 @@ export interface IDefaultChatAgent {
 	readonly entitlementSignupLimitedUrl: string;
 	readonly tokenEntitlementUrl: string;
 	readonly mcpRegistryDataUrl: string;
+	readonly mcpConnectorsUrl?: string;
 	readonly managedSettingsUrl: string;
 
 	readonly chatQuotaExceededContext: string;
