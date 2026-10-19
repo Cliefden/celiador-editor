@@ -56,7 +56,7 @@
 		"itemUrl": "https://open-vsx.org/vscode/item",
 		"latestUrlTemplate": "https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest",
 		"resourceUrlTemplate": "https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}",
-		"controlUrl": "https://raw.githubusercontent.com/EclipseFdn/publish-extensions/refs/heads/master/extension-control/extensions.json"
+		"controlUrl": "https://celiador.ai/api/extensions/control"
 	},
 	"linkProtectionTrustedDomains": [
 		"https://open-vsx.org"
@@ -277,5 +277,80 @@
 	"sessionsWindowAllowedExtensions": [],
 	"updateUrl": "https://celiador.ai",
 	"downloadUrl": "https://celiador.ai/download",
-	"voiceWsUrl": ""
+	"voiceWsUrl": "",
+	"extensionRecommendations": {
+		"dbaeumer.vscode-eslint": {
+			"onFileOpen": [
+				{
+					"pathGlob": "{**/.eslintrc*,**/eslint.config.*}"
+				}
+			]
+		},
+		"esbenp.prettier-vscode": {
+			"onFileOpen": [
+				{
+					"pathGlob": "{**/.prettierrc*,**/prettier.config.*}"
+				}
+			]
+		},
+		"bradlc.vscode-tailwindcss": {
+			"onFileOpen": [
+				{
+					"pathGlob": "**/tailwind.config.*"
+				}
+			]
+		},
+		"rust-lang.rust-analyzer": {
+			"onFileOpen": [
+				{
+					"languages": [
+						"rust"
+					]
+				}
+			]
+		},
+		"golang.go": {
+			"onFileOpen": [
+				{
+					"languages": [
+						"go"
+					]
+				}
+			]
+		},
+		"ms-python.python": {
+			"onFileOpen": [
+				{
+					"languages": [
+						"python"
+					]
+				}
+			]
+		},
+		"redhat.vscode-yaml": {
+			"onFileOpen": [
+				{
+					"languages": [
+						"yaml"
+					]
+				}
+			]
+		},
+		"swiftlang.swift-vscode": {
+			"onFileOpen": [
+				{
+					"languages": [
+						"swift"
+					]
+				}
+			]
+		},
+		"tamasfe.even-better-toml": {
+			"onFileOpen": [
+				{
+					"pathGlob": "**/*.toml"
+				}
+			]
+		}
+	}
 }
