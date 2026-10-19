@@ -116,3 +116,26 @@ helper; notarization rejects the result (the renderer helper must not carry the
 app's camera/microphone entitlements, the plugin helper needs
 `disable-library-validation` for native modules). The script signs each helper
 with its own plist, the way VS Code's own pipeline does.
+
+## Linux
+
+Same feed, same manifest, no signing (v1). The pieces:
+
+| Piece | Where | What it does |
+|---|---|---|
+| `build/celiador/release-linux.sh` | this repo | Takes the CI's `Celiador-linux-x64-<version>.{tar.gz,deb,rpm}`, reads `product.json` out of the tarball (commit, build number, extension present), renames the files to carry the commit, hashes them, merges a `linux-x64` manifest entry (`archive` = tar.gz, `.deb`/`.rpm` under `assets`) and with `--publish` rsyncs files first, manifest last. |
+| `.github/workflows/release-linux.yml` | this repo | Manual. Job 1 builds on a hosted Ubuntu runner (the glibc 2.28 sysroot setup is Linux-only) and hands the packages over as a 1-day artifact; job 2 runs the script on the self-hosted Mac, the machine with ssh to the box. |
+| `GET /api/releases/latest/linux-x64/stable/{deb,rpm,archive}` | daemon | Stable download links. `kind` is now any asset the entry carries, on every platform. |
+| `GET /api/update/linux-x64/stable/<commit>` | daemon | What an installed Linux Celiador polls. There is no in-place updater on Linux, so the descriptor's `url` is the **download page**, not an archive: the editor shows "update available" and opens it in the browser. |
+
+Cutting a Linux release: Actions → *Release (Linux)* → *Run workflow*, with notes.
+Afterwards `curl -s https://celiador.ai/api/releases/latest/linux-x64/stable | jq .`
+should show the build with `assetUrls.deb` and `assetUrls.rpm`, and the download
+page's Linux row lists the three links.
+
+Checking a package without a Linux box: `docker run --rm -it -v "$PWD/.build/out:/pkg" ubuntu:24.04`
+then `apt-get update && apt-get install -y /pkg/Celiador-linux-x64-*.deb && celiador --version`
+(the CLI prints the version without needing a display).
+
+Follow-ups: arm64 in the matrix; `.deb`/`.rpm` GPG signing so apt/dnf repos
+become possible; snap/flatpak only if testers ask.
