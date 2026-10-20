@@ -11,13 +11,13 @@ import { generateUuid } from '../../../../../../base/common/uuid.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
-import { LOCAL_AGENT_HOST_SCHEME_PREFIX } from '../../../../../../platform/agentHost/common/agentHostConnectionsService.js';
+import { IAgentHostConnectionsService, LOCAL_AGENT_HOST_SCHEME_PREFIX } from '../../../../../../platform/agentHost/common/agentHostConnectionsService.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
 import { ActionEnvelope, ChatInputCompletedAction, ChatPendingMessageSetAction, ChatToolCallConfirmedAction, ChatTurnStartedAction } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
 import { ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputResponseKind, MessageKind, PendingMessageKind, ToolCallCancellationReason, ToolCallConfirmationReason } from '../../../../../../platform/agentHost/common/state/protocol/channels-chat/state.js';
-import { buildDefaultChatUri, isDefaultChatUri, parseChatUri, SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
+import { buildDefaultChatUri, getCanonicalOpaqueChatUuid, parseChatUri, SessionState, StateComponents } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
@@ -79,7 +79,9 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	/** sessionResource.toString() → last published status (de-dupes repeats). */
 	private readonly _lastStatus = new Map<string, ChatSessionStatus>();
 	/** sessionResource.toString() → its session-state subscription + resolved chat channels (primary = where instructions dispatch). */
-	private readonly _watches = new Map<string, { readonly ref: IReference<IAgentSubscription<SessionState>>; readonly store: DisposableStore; chatChannels: Set<string>; primary: string | undefined }>();
+	private readonly _watches = new Map<string, { readonly ref: IReference<IAgentSubscription<SessionState>>; readonly store: DisposableStore; readonly backend: string; chatChannels: Set<string>; primary: string | undefined }>();
+	/** backend session URI (`ahp-session:/<id>`) string → owning sessionResource.toString() (routes session-channel actions). */
+	private readonly _backendToKey = new Map<string, string>();
 	/** chat channel URI string → owning sessionResource.toString() (routes action events). */
 	private readonly _chatChannelToKey = new Map<string, string>();
 	/** Channels we've already trace-logged as unrouted (avoid per-delta spam). */
@@ -109,6 +111,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	constructor(
 		@IAgentSessionsService private readonly _sessionsService: IAgentSessionsService,
 		@IAgentHostService private readonly _agentHostService: IAgentHostService,
+		@IAgentHostConnectionsService private readonly _connectionsService: IAgentHostConnectionsService,
 		@IAuthenticationService private readonly _authenticationService: IAuthenticationService,
 		@IChatService private readonly _chatService: IChatService,
 		@IProductService private readonly _productService: IProductService,
@@ -256,10 +259,15 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	 * channel (and `defaultChat` can be unset) and would otherwise route nothing.
 	 */
 	private _watchSession(key: string, resource: URI): void {
-		const ref = this._agentHostService.getSubscription(StateComponents.Session, resource, 'CeliadorRelayBridge');
+		// The agent host addresses sessions by their backend URI (`ahp-session:/<id>`),
+		// not the model resource (`agent-host-claude:/<id>`); subscribing with the
+		// model resource fails with "Session not found on backend".
+		const backend = this._backendSession(resource);
+		this._backendToKey.set(backend.toString(), key);
+		const ref = this._agentHostService.getSubscription(StateComponents.Session, backend, 'CeliadorRelayBridge');
 		const store = new DisposableStore();
 		store.add(ref);
-		const watch = { ref, store, chatChannels: new Set<string>(), primary: undefined as string | undefined };
+		const watch = { ref, store, backend: backend.toString(), chatChannels: new Set<string>(), primary: undefined as string | undefined };
 		this._watches.set(key, watch);
 		const update = () => {
 			const state = ref.object.value;
@@ -274,8 +282,9 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 						next.add(chat.resource.toString());
 					}
 				}
+				// Upstream no longer derives the default chat from its URI shape; the
+				// host advertises it as `defaultChat`.
 				primary = state.defaultChat?.toString()
-					?? state.chats?.find(chat => isDefaultChatUri(chat.resource))?.resource?.toString()
 					?? state.chats?.[0]?.resource?.toString();
 			}
 			watch.primary = primary;
@@ -297,15 +306,28 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	}
 
 	/**
+	 * The backend session URI the agent host uses for a model session resource,
+	 * resolved through upstream's connections service. Falls back to stripping
+	 * the local agent-host scheme prefix for sessions it cannot resolve yet.
+	 */
+	private _backendSession(resource: URI): URI {
+		const identity = this._connectionsService.resolveSessionResourceIdentity(resource);
+		if (identity) {
+			return identity.backendSession;
+		}
+		const value = resource.toString();
+		return URI.parse(value.startsWith(LOCAL_AGENT_HOST_SCHEME_PREFIX) ? value.slice(LOCAL_AGENT_HOST_SCHEME_PREFIX.length) : value);
+	}
+
+	/**
 	 * Resolve which mirrored session an action channel belongs to. Chat actions
-	 * arrive on `ahp-chat://` channel URIs that ENCODE their owning session (see
-	 * parseChatUri — the state's `chats`/`defaultChat` are often not yet populated
-	 * when the first deltas stream), and session-level actions arrive on the
-	 * session resource itself. Subagent chats are excluded — their deltas would
-	 * pollute the phone transcript.
+	 * arrive on chat channel URIs that the session-state watch maps to their
+	 * session (chat URIs no longer encode their session); session-level actions
+	 * arrive on the backend session URI. Subagent chats are excluded — their
+	 * deltas would pollute the phone transcript.
 	 */
 	private _resolveActionKey(channel: string): string | undefined {
-		const direct = this._chatChannelToKey.get(channel);
+		const direct = this._chatChannelToKey.get(channel) ?? this._backendToKey.get(channel);
 		if (direct) {
 			return direct;
 		}
@@ -330,9 +352,13 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		if (!parsed || parsed.chatId.startsWith('subagent')) {
 			return undefined;
 		}
-		for (const candidate of candidates(parsed.session)) {
-			if (this._clients.has(candidate)) {
-				return candidate;
+		// Chat URIs no longer expose their owning session (upstream is moving them
+		// to opaque ids). Until the state watch above maps the channel, match it
+		// against the default chat URI each mirrored session would have minted.
+		for (const key of this._clients.keys()) {
+			const backend = this._watches.get(key)?.backend;
+			if (backend && channel === buildDefaultChatUri(backend)) {
+				return key;
 			}
 		}
 		return undefined;
@@ -346,13 +372,15 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			// A chat action for a session we don't mirror YET (its client is created
 			// once the model reports it in progress) — keep it so the first user turn
 			// and any leading deltas can be replayed. Subagent chats are not mirrored.
+			// Chats are either legacy minted URIs or opaque `ahp-chat:/<uuid>` ids.
 			const parsed = parseChatUri(channel);
-			if (parsed && !parsed.chatId.startsWith('subagent')) {
+			const isMirrorableChat = (parsed !== undefined && !parsed.chatId.startsWith('subagent')) || getCanonicalOpaqueChatUuid(channel) !== undefined;
+			if (isMirrorableChat) {
 				this._bufferEarlyAction(envelope);
 			}
 			if (!this._unroutedLogged.has(channel)) {
 				this._unroutedLogged.add(channel);
-				this._logService.trace(`[celiador-relay] unrouted action channel ${channel} (${parsed ? 'buffered' : 'ignored'}; clients: ${[...this._clients.keys()].join(', ') || 'none'})`);
+				this._logService.trace(`[celiador-relay] unrouted action channel ${channel} (${isMirrorableChat ? 'buffered' : 'ignored'}; clients: ${[...this._clients.keys()].join(', ') || 'none'})`);
 			}
 			return;
 		}
@@ -459,8 +487,8 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		// channel is derivable from the session resource, so fall back to it
 		// (built from the PROTOCOL uri: the model key carries the agent-host-
 		// scheme prefix the protocol layer doesn't know).
-		const protocolUri = key.startsWith(LOCAL_AGENT_HOST_SCHEME_PREFIX) ? key.slice(LOCAL_AGENT_HOST_SCHEME_PREFIX.length) : key;
-		const chatChannel = this._watches.get(key)?.primary ?? buildDefaultChatUri(protocolUri);
+		const watch = this._watches.get(key);
+		const chatChannel = watch?.primary ?? buildDefaultChatUri(watch?.backend ?? this._backendSession(URI.parse(key)).toString());
 		if (!text.trim()) {
 			return;
 		}
@@ -624,6 +652,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		}
 		const watch = this._watches.get(key);
 		if (watch) {
+			this._backendToKey.delete(watch.backend);
 			if (watch.chatChannels.size > 0) {
 				for (const channel of watch.chatChannels) {
 					this._chatChannelToKey.delete(channel);

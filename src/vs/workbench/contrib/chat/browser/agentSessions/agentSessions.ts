@@ -12,6 +12,9 @@ import { getChatSessionType } from '../../common/model/chatUri.js';
 import { isAgentHostTarget, SessionType } from '../../common/chatSessionsService.js';
 import { IChatRequestVariableEntry } from '../../common/attachments/chatVariableEntries.js';
 import product from '../../../../../platform/product/common/product.js';
+import { MenuId } from '../../../../../platform/actions/common/actions.js';
+
+export const AgentSessionChatContextMenu = new MenuId('AgentSessionChatContext');
 
 export enum AgentSessionProviders {
 	Local = SessionType.Local,
@@ -190,7 +193,7 @@ export function getAgentSessionProviderDescription(provider: AgentSessionTarget)
 		case AgentSessionProviders.Growth:
 			return localize('chat.session.providerDescription.growth', "Learn about Copilot features.");
 		case AgentSessionProviders.AgentHostCopilot:
-			return localize('chat.session.providerDescription.agentHostCopilot', "Run a Copilot SDK agent in the local agent host process.");
+			return localize('chat.session.providerDescription.agentHostCopilot', "Run tasks using the Copilot SDK, which is the agent experience shared consistently across GitHub Copilot products. The agent works in the Agent Host, which lets sessions continue in the background, independently of an editor window.");
 		default:
 			return '';
 	}
