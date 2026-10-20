@@ -1040,6 +1040,22 @@ export class ClaudeAgentSession extends Disposable {
 	 */
 	get hasPendingTransportSwitch(): boolean { return this._pendingTransportSwitch; }
 
+	// --- Start Celiador ---
+	/**
+	 * The daemon transport bakes the user's Celiador token into the SDK
+	 * subprocess environment, and that token expires hourly. When the agent
+	 * receives a refreshed token it flags live daemon sessions here, so the
+	 * next {@link send} resolves a transport carrying the new token and
+	 * rebuilds onto it (the resume rebuild preserves the conversation).
+	 * Without this a session older than the token answers every turn with 401.
+	 */
+	requestDaemonTokenRefresh(): void {
+		if (this._transportKind === 'daemon') {
+			this._pendingTransportSwitch = true;
+		}
+	}
+	// --- End Celiador ---
+
 	private _requirePipeline(): ClaudeSdkPipeline {
 		if (!this._pipeline) {
 			throw new Error('ClaudeAgentSession is not materialized');

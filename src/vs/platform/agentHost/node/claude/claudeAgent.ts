@@ -847,7 +847,15 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		if (resource === this._celiadorDaemonResource().resource) {
 			const next = token || undefined;
 			if (this._daemonToken !== next) {
+				const refreshed = this._daemonToken !== undefined && next !== undefined;
 				this._daemonToken = next;
+				if (refreshed) {
+					// Live sessions hold the old (soon expired) token in their SDK
+					// subprocess; rebuild them onto the new one at their next send.
+					for (const session of this._allLiveSessions()) {
+						session.requestDaemonTokenRefresh();
+					}
+				}
 				void this._startModelRefresh();
 				this._logService.info(next ? '[Claude] Celiador daemon token updated' : '[Claude] Celiador daemon token cleared');
 			}

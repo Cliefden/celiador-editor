@@ -6743,6 +6743,33 @@ suite('ClaudeAgent — per-session provider', () => {
 		});
 	});
 
+	test('Celiador: a refreshed daemon token rebuilds a live daemon session onto the new token at the next send', async () => {
+		// The daemon token expires hourly and is baked into the SDK subprocess env;
+		// a session older than the token would otherwise 401 on every later turn.
+		const ctx = createTestContext(disposables);
+		await ctx.agent.authenticate('https://celiador.ai/api/anthropic', 'daemon-token-1');
+		await tick();
+		const created = await createSession(ctx.agent, { workingDirectories: [URI.file('/workspace')] });
+		const sessionId = created.sdkSessionId;
+		const chat = defaultChatUri(created.session);
+		ctx.sdk.nextQueryMessages = [makeSystemInitMessage(sessionId), makeResultSuccess(sessionId)];
+		await ctx.agent.chats.sendMessage(chat, 'hi', undefined, undefined, 'turn-1', undefined, undefined, chatContext(chat));
+
+		await ctx.agent.authenticate('https://celiador.ai/api/anthropic', 'daemon-token-2');
+		ctx.sdk.nextQueryMessages = [makeSystemInitMessage(sessionId), makeResultSuccess(sessionId)];
+		await ctx.agent.chats.sendMessage(chat, 'again', undefined, undefined, 'turn-2', undefined, undefined, chatContext(chat));
+
+		assert.deepStrictEqual({
+			startups: ctx.sdk.startupCallCount,
+			tokens: ctx.sdk.capturedStartupOptions.map(proxyAuthTokenOf),
+			resume: ctx.sdk.capturedStartupOptions[1]?.resume,
+		}, {
+			startups: 2,
+			tokens: ['daemon-token-1', 'daemon-token-2'],
+			resume: sessionId,
+		});
+	});
+
 	test('a same-transport model change still hot-swaps the live query (no rebuild)', async () => {
 		const ctx = createTestContext(disposables);
 		const { sessionUri, advance } = await materializeSession(ctx, { block: true });
