@@ -999,6 +999,7 @@ export class SessionWorkspaceConversionService extends Disposable implements ISe
 				[SessionConfigKey.Isolation]: isolationConfig.isolationProperty.protocol,
 				...(isolationConfig.branchProperty ? { [SessionConfigKey.Branch]: isolationConfig.branchProperty.protocol } : {}),
 				...(isolationConfig.worktreeBranchPrefixProperty ? { [SessionConfigKey.WorktreeBranchPrefix]: isolationConfig.worktreeBranchPrefixProperty.protocol } : {}),
+				...(isolationConfig.worktreeBranchNameProperty ? { [SessionConfigKey.WorktreeBranchName]: isolationConfig.worktreeBranchNameProperty.protocol } : {}), // Celiador
 				...(isolationConfig.worktreeIncludeFilesProperty ? { [SessionConfigKey.WorktreeIncludeFiles]: isolationConfig.worktreeIncludeFilesProperty.protocol } : {}),
 				...(isolationConfig.worktreeSymlinkFoldersProperty ? { [SessionConfigKey.WorktreeSymlinkFolders]: isolationConfig.worktreeSymlinkFoldersProperty.protocol } : {}),
 			};

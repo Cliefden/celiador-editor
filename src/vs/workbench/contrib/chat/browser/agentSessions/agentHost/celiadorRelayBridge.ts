@@ -28,6 +28,7 @@ import { ChatSessionStatus } from '../../../common/chatSessionsService.js';
 import { isAgentHostTarget } from '../agentSessions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
 import { CeliadorRelayClient, IRelayGitArgs, RelayFsKind, RelayGitKind } from './celiadorRelayClient.js';
+import { getCeliadorTaskRun } from './celiadorTaskRuns.js';
 
 type PhoneCommandClassification = {
 	command: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Which steering command the companion phone sent: cancel, approve, reject, instruct, answer, fs.*, git.*.' };
@@ -172,7 +173,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				}
 				client = this._createClient(key, session.resource);
 				const title = session.label || 'Agent session';
-				void client.start(title).then(() => {
+				void client.start(title, getCeliadorTaskRun(key)?.taskId).then(() => {
 					// Publish the current status once the relay session exists.
 					const current = this._sessionsService.model.getSession(session.resource);
 					if (current && this._clients.get(key) === client) {
@@ -550,7 +551,8 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			return;
 		}
 		try {
-			const root = this._workspaceService.getWorkspace().folders[0]?.uri;
+			// Celiador: an agent task's run browses its own worktree, not the window's checkout.
+			const root = getCeliadorTaskRun(key)?.worktree ?? this._workspaceService.getWorkspace().folders[0]?.uri;
 			if (!root) {
 				throw new Error('no workspace open');
 			}
@@ -596,7 +598,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			return;
 		}
 		try {
-			const result = await this._commandService.executeCommand<{ ok: boolean;[key: string]: unknown }>('celiador.relayGit', { kind, ...args });
+			const result = await this._commandService.executeCommand<{ ok: boolean;[key: string]: unknown }>('celiador.relayGit', { kind, ...args, root: getCeliadorTaskRun(key)?.worktree?.fsPath }); // Celiador: a task run's own worktree
 			if (!result) {
 				throw new Error('run review is unavailable');
 			}

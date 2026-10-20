@@ -130,7 +130,7 @@ export class CeliadorRelayClient extends Disposable {
 	}
 
 	/** Lazily create the session (titled by the first prompt) and open its command channel. */
-	async start(title: string): Promise<void> {
+	async start(title: string, taskId?: string): Promise<void> {
 		if (this._sessionId || this._disposed) {
 			return;
 		}
@@ -142,7 +142,7 @@ export class CeliadorRelayClient extends Disposable {
 			const res = await fetch(`${this._options.getUrl()}/api/sessions`, {
 				method: 'POST',
 				headers: this._headers(token),
-				body: JSON.stringify({ title, origin: 'editor', runner: 'editor' }),
+				body: JSON.stringify({ title, origin: 'editor', runner: 'editor', ...(taskId ? { taskId } : {}) }), // Celiador: taskId links an agent task's run
 			});
 			if (!res.ok) {
 				return;

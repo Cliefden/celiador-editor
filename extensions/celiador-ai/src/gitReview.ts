@@ -20,6 +20,8 @@ interface GitReviewArgs {
   title?: string;
   body?: string;
   base?: string;
+  /** Celiador agent task: the run's own worktree; the main checkout when unset. */
+  root?: string;
 }
 
 /** The `fs.result` payload (minus requestId, which the bridge owns). */
@@ -122,6 +124,8 @@ async function openPullRequest(target: { owner: string; repo: string }, head: st
 }
 interface GitAPI {
   repositories: GitRepository[];
+  getRepository(uri: vscode.Uri): GitRepository | null;
+  openRepository(root: vscode.Uri): Promise<GitRepository | null>;
 }
 
 /** vscode.git `Status` enum → the short code the phone renders. */
@@ -140,12 +144,15 @@ const STATUS_CODE: Record<number, string> = {
 };
 const IGNORED = 8;
 
-async function getRepo(): Promise<GitRepository> {
+async function getRepo(root?: string): Promise<GitRepository> {
   const ext = vscode.extensions.getExtension('vscode.git');
   if (!ext) {throw new Error('git is not available');}
-  const exports = (await ext.activate()) as { getAPI(version: number): GitAPI };
-  const repo = exports.getAPI(1).repositories[0];
-  if (!repo) {throw new Error('no git repository open');}
+  const api = (await ext.activate() as { getAPI(version: number): GitAPI }).getAPI(1);
+  // An agent task runs in its own worktree: open that repository rather than the window's.
+  const repo = root
+    ? api.getRepository(vscode.Uri.file(root)) ?? await api.openRepository(vscode.Uri.file(root))
+    : api.repositories[0];
+  if (!repo) {throw new Error(root ? `no git repository at ${root}` : 'no git repository open');}
   return repo;
 }
 
@@ -185,7 +192,7 @@ async function untrackedPatch(repo: GitRepository, rel: string): Promise<string>
 }
 
 async function execute(args: GitReviewArgs): Promise<GitReviewResult> {
-  const repo = await getRepo();
+  const repo = await getRepo(args.root);
   switch (args.kind) {
     case 'git.status': {
       await repo.status(); // refresh so the phone sees the current tree, not a cached one
@@ -257,4 +264,78 @@ export function registerGitReview(): vscode.Disposable {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
+}
+
+// --- Agent tasks (issue → worktree run → pull request) -----------------------
+
+/** What the editor control asks for when a task's run has finished. */
+interface FinishTaskArgs {
+  /** The run's worktree. */
+  root: string;
+  title: string;
+  issue?: { number: number; url: string };
+}
+
+/** The worktree checked out on `branch` under the repository at `repoRoot`, if any. */
+async function worktreeForBranch(repoRoot: string, branch: string): Promise<string | undefined> {
+  const { execFile } = await import('child_process');
+  const out = await new Promise<string>((resolve, reject) =>
+    execFile('git', ['-C', repoRoot, 'worktree', 'list', '--porcelain'], { timeout: 15_000 }, (err, stdout) => err ? reject(err) : resolve(stdout)));
+  let current: string | undefined;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      current = line.slice('worktree '.length);
+    } else if (line === `branch refs/heads/${branch}`) {
+      return current;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Finish an agent task: commit whatever the agent left uncommitted, push the
+ * branch, and open its pull request (`Closes #n` when it came from an issue).
+ * Uses the user's git identity, hooks and credentials, and the editor's GitHub
+ * sign-in — without one, a compare link comes back instead (`created: false`).
+ */
+async function finishTask(args: FinishTaskArgs): Promise<GitReviewResult> {
+  const repo = await getRepo(args.root);
+  await repo.status();
+  const branch = repo.state.HEAD?.name;
+  if (!branch) {return { ok: false, error: 'the run left a detached HEAD' };}
+  const leftovers = changedFiles(repo);
+  if (leftovers.length) {
+    await repo.add(leftovers.map((f) => absPath(repo, f.path)));
+    await repo.commit(args.issue ? `${args.title} (#${args.issue.number})` : args.title);
+  }
+  const remote = pickRemote(repo);
+  const target = parseGitHubRemote(remote?.pushUrl ?? remote?.fetchUrl);
+  if (!remote || !target) {return { ok: false, error: `the repository's remote is not on GitHub` };}
+  await repo.push(remote.name, branch, true);
+  const body = args.issue ? `Closes #${args.issue.number}` : '';
+  const pr = await openPullRequest(target, branch, { kind: 'git.pr', title: args.title, body });
+  if (!pr.ok && /no commits between/i.test(pr.error ?? '')) {
+    return { ok: false, error: 'the agent made no changes' };
+  }
+  return { ...pr, branch };
+}
+
+/** Register the agent-task commands the workbench's editor control calls. */
+export function registerTaskCommands(): vscode.Disposable {
+  return vscode.Disposable.from(
+    vscode.commands.registerCommand('celiador.taskWorktree', async (args: { repoRoot: string; branch: string }): Promise<string | undefined> => {
+      try {
+        return await worktreeForBranch(args.repoRoot, args.branch);
+      } catch {
+        return undefined;
+      }
+    }),
+    vscode.commands.registerCommand('celiador.finishTask', async (args: FinishTaskArgs): Promise<GitReviewResult> => {
+      try {
+        return await finishTask(args);
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }),
+  );
 }
