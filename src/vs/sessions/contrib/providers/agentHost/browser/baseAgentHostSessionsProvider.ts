@@ -25,7 +25,8 @@ import { getAgentHostChatId } from '../../../../../platform/agentHost/common/age
 import { agentModelConfigurationReportKey } from '../../../../../platform/agentHost/common/agentModelConfiguration.js';
 import { isNativeAgentHost } from '../../../../../platform/agentHost/common/meta/agentHostSessionUrisMeta.js';
 import { localize } from '../../../../../nls.js';
-import { AgentSession, AuthenticateParams, AuthenticateResult, CODEX_AGENT_PROVIDER_ID, type IAgentSessionChatMetadata, IAgentSessionMetadata, protectedResourcesRequireGitHubCopilotSignIn } from '../../../../../platform/agentHost/common/agent.js';
+import product from '../../../../../platform/product/common/product.js';
+import { AgentSession, AuthenticateParams, AuthenticateResult, CLAUDE_AGENT_PROVIDER_ID, CODEX_AGENT_PROVIDER_ID, type IAgentSessionChatMetadata, IAgentSessionMetadata, protectedResourcesRequireGitHubCopilotSignIn } from '../../../../../platform/agentHost/common/agent.js';
 import { AgentMergeSessionOverrides, AgentMergeSessionState, readAgentMergeFolderState, readAgentMergeFolderStates } from '../../../../../platform/agentHost/common/agentMerge.js';
 import { readAgentSdkSetupInfos } from '../../../../../platform/agentHost/common/agentSdkSetup.js';
 import { type IAgentCanvasInfo, IAgentConnection } from '../../../../../platform/agentHost/common/agentService.js';
@@ -4741,7 +4742,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 				supportsWorktreeConfiguration: true,
 				authRequirement: resolveAgentAuthRequirement(agent),
 				initializationOnSelection: setupAgents.has(agent.provider) ? {
-					canInitializeWithoutGitHub: agent.provider === CODEX_AGENT_PROVIDER_ID && canInitializeCodexAccount,
+					canInitializeWithoutGitHub: (agent.provider === CODEX_AGENT_PROVIDER_ID && canInitializeCodexAccount)
+						// Celiador: Claude signs in through the Celiador daemon, never GitHub, so the
+						// Agents window must not force (or loop on) a GitHub sign-in for it.
+						|| (agent.provider === CLAUDE_AGENT_PROVIDER_ID && product.nameShort !== 'Code - OSS'),
 				} : undefined,
 				// The chat session contribution and language models for an agent-host
 				// agent are registered under its resource scheme (`agent-host-<provider>`),

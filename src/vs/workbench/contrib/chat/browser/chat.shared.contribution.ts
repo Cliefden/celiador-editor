@@ -2446,7 +2446,7 @@ configurationRegistry.registerConfiguration({
 		[ChatConfiguration.WelcomePageSignInEnabled]: {
 			type: 'boolean',
 			description: nls.localize('chat.welcomePage.signIn.enabled', "Controls whether the Welcome page shows a GitHub sign-in button instead of the Agents window button when signed out."),
-			default: true,
+			default: product.nameShort === 'Code - OSS', // Celiador: never offer GitHub sign-in on the Welcome page (Celiador users sign in to Celiador, not GitHub)
 			tags: ['experimental'],
 			experiment: { mode: 'auto' },
 		},
