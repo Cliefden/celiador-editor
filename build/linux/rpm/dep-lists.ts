@@ -80,7 +80,6 @@ export const referenceGeneratedDepsByArch = {
 		'libm.so.6()(64bit)',
 		'libm.so.6(GLIBC_2.2.5)(64bit)',
 		'libm.so.6(GLIBC_2.23)(64bit)',
-		'libm.so.6(GLIBC_2.27)(64bit)',
 		'libnspr4.so()(64bit)',
 		'libnss3.so()(64bit)',
 		'libnss3.so(NSS_3.11)(64bit)',

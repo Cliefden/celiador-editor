@@ -62,7 +62,8 @@ jobs:
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: |
           set -e
-          python3 -m pip install --break-system-packages setuptools
+          # node-gyp needs setuptools on Python 3.12+; Xcode's older pip has no --break-system-packages.
+          python3 -m pip install --break-system-packages setuptools 2>/dev/null || python3 -m pip install --user setuptools || echo "setuptools not installed; continuing"
           for i in {1..5}; do
             npm ci && break
             if [ $i -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
