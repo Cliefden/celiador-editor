@@ -390,6 +390,7 @@ const HOST_OWNED_SESSION_CONFIG_KEYS = [
 	SessionConfigKey.Isolation,
 	SessionConfigKey.Branch,
 	SessionConfigKey.WorktreeBranchPrefix,
+	SessionConfigKey.WorktreeBranchName, // Celiador
 	SessionConfigKey.WorktreeIncludeFiles,
 	SessionConfigKey.WorktreeSymlinkFolders,
 	SessionConfigKey.PullRequestUrl,
@@ -8815,6 +8816,11 @@ export class AgentService extends Disposable implements IAgentService {
 		if (iso.worktreeBranchPrefixProperty) {
 			properties[SessionConfigKey.WorktreeBranchPrefix] = iso.worktreeBranchPrefixProperty.protocol;
 		}
+		// --- Start Celiador ---
+		if (iso.worktreeBranchNameProperty) {
+			properties[SessionConfigKey.WorktreeBranchName] = iso.worktreeBranchNameProperty.protocol;
+		}
+		// --- End Celiador ---
 		if (iso.worktreeIncludeFilesProperty) {
 			properties[SessionConfigKey.WorktreeIncludeFiles] = iso.worktreeIncludeFilesProperty.protocol;
 		}
@@ -8830,6 +8836,11 @@ export class AgentService extends Disposable implements IAgentService {
 		if (iso.worktreeBranchPrefixProperty && typeof params.config?.[SessionConfigKey.WorktreeBranchPrefix] === 'string') {
 			values[SessionConfigKey.WorktreeBranchPrefix] = params.config[SessionConfigKey.WorktreeBranchPrefix];
 		}
+		// --- Start Celiador ---
+		if (iso.worktreeBranchNameProperty && typeof params.config?.[SessionConfigKey.WorktreeBranchName] === 'string') {
+			values[SessionConfigKey.WorktreeBranchName] = params.config[SessionConfigKey.WorktreeBranchName];
+		}
+		// --- End Celiador ---
 		const pullRequestUrl = getSessionPullRequestUrl(params.config);
 		if (pullRequestUrl !== undefined) {
 			values[SessionConfigKey.PullRequestUrl] = pullRequestUrl;

@@ -345,6 +345,7 @@ export const WELL_KNOWN_PICKER_PROPERTIES: ReadonlySet<string> = new Set<string>
 	'effectiveAutoTier',
 	SessionConfigKey.Permissions,
 	SessionConfigKey.WorktreeBranchPrefix,
+	SessionConfigKey.WorktreeBranchName, // Celiador
 	SessionConfigKey.WorktreeIncludeFiles,
 	SessionConfigKey.WorktreeSymlinkFolders,
 	SessionConfigKey.PullRequestUrl,

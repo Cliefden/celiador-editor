@@ -263,6 +263,19 @@ export { getWorktreesRoot };
  * `agents/` prefix so the directory stays concise, then flattens any remaining
  * path separators.
  */
+// --- Start Celiador ---
+/**
+ * A conservative subset of git's ref-name rules for a requested worktree
+ * branch: plain characters only, no `..`, `//`, `@{`, trailing `.`/`/` or
+ * `.lock`. Anything else falls back to a generated name.
+ */
+export function isPlausibleBranchName(name: string): boolean {
+	return /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,99}$/.test(name)
+		&& !name.includes('..') && !name.includes('//')
+		&& !name.endsWith('/') && !name.endsWith('.') && !name.endsWith('.lock');
+}
+// --- End Celiador ---
+
 export function getWorktreeName(branchName: string, branchPrefix: string = ''): string {
 	let name = branchName;
 	if (branchPrefix && name.startsWith(branchPrefix)) {
@@ -484,6 +497,10 @@ export interface IIsolationConfigContribution {
 	 * isolation (see {@link WorktreeIsolation.resolveWorkingDirectory}).
 	 */
 	readonly worktreeBranchPrefixProperty: ISchemaProperty<string> | undefined;
+	// --- Start Celiador ---
+	/** Read-only carrier for an exact worktree branch name (a Celiador agent task's branch). */
+	readonly worktreeBranchNameProperty?: ISchemaProperty<string>;
+	// --- End Celiador ---
 	/** Read-only carrier for the client's `git.worktreeIncludeFiles`. */
 	readonly worktreeIncludeFilesProperty: ISchemaProperty<readonly string[]> | undefined;
 	/** Read-only carrier for the client's `git.worktreeSymlinkFolders`. */
@@ -1005,6 +1022,7 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 		let branchDefault: string | undefined;
 		let branchProperty: ISchemaProperty<string> | undefined;
 		let worktreeBranchPrefixProperty: ISchemaProperty<string> | undefined;
+		let worktreeBranchNameProperty: ISchemaProperty<string> | undefined; // Celiador
 		let worktreeIncludeFilesProperty: ISchemaProperty<readonly string[]> | undefined;
 		let worktreeSymlinkFoldersProperty: ISchemaProperty<readonly string[]> | undefined;
 
@@ -1056,6 +1074,18 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 				sessionMutable: false,
 			});
 
+			// --- Start Celiador ---
+			// Carrier for an exact branch name (a Celiador agent task's `<issue>-<slug>`),
+			// declared like the prefix above: non-pickable, seeded by the client.
+			worktreeBranchNameProperty = schemaProperty<string>({
+				type: 'string',
+				title: localize('agentHost.sessionConfig.worktreeBranchName', "Worktree Branch Name"),
+				description: localize('agentHost.sessionConfig.worktreeBranchNameDescription', "Exact name for the branch created for an isolated worktree."),
+				readOnly: true,
+				sessionMutable: false,
+			});
+			// --- End Celiador ---
+
 			worktreeIncludeFilesProperty = schemaProperty<readonly string[]>({
 				type: 'array',
 				title: localize('agentHost.sessionConfig.worktreeIncludeFiles', "Worktree Include Files"),
@@ -1081,7 +1111,7 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 			});
 		}
 
-		return { isolationProperty, branchProperty, worktreeBranchPrefixProperty, worktreeIncludeFilesProperty, worktreeSymlinkFoldersProperty, pullRequestUrlProperty, isolationValue, branchDefault, branchValue };
+		return { isolationProperty, branchProperty, worktreeBranchPrefixProperty, worktreeBranchNameProperty, worktreeIncludeFilesProperty, worktreeSymlinkFoldersProperty, pullRequestUrlProperty, isolationValue, branchDefault, branchValue };
 	}
 
 	/**
@@ -1168,7 +1198,16 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 			const worktreesRoot = getWorktreesRoot(repositoryRoot);
 
 			onProgress?.(buildWorktreeProgressText(WorktreeCreationPhase.NamingBranch));
-			const newBranchName = await this._branchNameGenerator.generateBranchName({
+			// --- Start Celiador ---
+			// An exact name (a Celiador agent task's branch) wins when it is a valid,
+			// unused ref name; otherwise fall back to the generated one.
+			const requestedBranchName = typeof config[SessionConfigKey.WorktreeBranchName] === 'string' ? (config[SessionConfigKey.WorktreeBranchName] as string).trim() : '';
+			const exactBranchName = requestedBranchName && isPlausibleBranchName(requestedBranchName)
+				&& !(await this._gitService.branchExists(repositoryRoot, requestedBranchName).catch(() => true))
+				&& !(await fileExists(URI.joinPath(worktreesRoot, getWorktreeName(requestedBranchName, worktreeBranchPrefix)).fsPath))
+				? requestedBranchName : undefined;
+			// --- End Celiador ---
+			const newBranchName = exactBranchName ?? await this._branchNameGenerator.generateBranchName({
 				sessionId,
 				message: prompt,
 				githubToken,

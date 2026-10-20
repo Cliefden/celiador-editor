@@ -8,6 +8,8 @@ import { Disposable, toDisposable } from '../../../../../../base/common/lifecycl
 import { joinPath } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { SessionConfigKey } from '../../../../../../platform/agentHost/common/sessionConfigKeys.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
@@ -15,7 +17,12 @@ import { ITelemetryService } from '../../../../../../platform/telemetry/common/t
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
 import { IAuthenticationService } from '../../../../../services/authentication/common/authentication.js';
-import { SessionType } from '../../../common/chatSessionsService.js';
+import { ChatSessionStatus, SessionType } from '../../../common/chatSessionsService.js';
+import { ChatSessionPosition, getResourceForNewChatSession, openChatSession } from '../../chatSessions/chatSessions.contribution.js';
+import { IAgentSessionsService } from '../agentSessionsService.js';
+import { getLocalAgentHostSessionProvider } from './agentHostSessionUri.js';
+import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
+import { celiadorTaskRunEntries, deleteCeliadorTaskRun, setCeliadorTaskRun, type ICeliadorTaskRun } from './celiadorTaskRuns.js';
 import { normalizeToHttps, parseRemoteUrl } from './celiadorWorkspacePresence.js';
 
 type PhoneRunClassification = {
@@ -23,6 +30,18 @@ type PhoneRunClassification = {
 	owner: 'celiador';
 	comment: 'The companion phone started a run on this editor via "Run on your editor".';
 };
+/** A `start-task` command from the daemon's agent task queue. */
+interface ITaskCommand {
+	readonly kind: 'start-task';
+	readonly taskId?: string;
+	readonly remoteUrl?: string;
+	readonly name?: string;
+	readonly branch?: string;
+	readonly prompt?: string;
+	readonly title?: string;
+	readonly issue?: { readonly number: number; readonly url: string };
+}
+
 type PhoneRunEvent = {
 	seeded: boolean;
 };
@@ -66,9 +85,14 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		@IProductService private readonly _productService: IProductService,
 		@ILogService private readonly _logService: ILogService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@IAgentHostUntitledProvisionalSessionService private readonly _provisionalSessions: IAgentHostUntitledProvisionalSessionService,
+		@IAgentSessionsService private readonly _sessionsService: IAgentSessionsService,
 	) {
 		super();
 		this._register(toDisposable(() => this._abort.abort()));
+		// Agent tasks: notice when a task's run finishes, then open its pull request.
+		this._register(this._sessionsService.model.onDidChangeSessions(() => this._checkTaskRuns()));
 		void this._loop();
 	}
 
@@ -138,6 +162,9 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		} catch {
 			return;
 		}
+		if (cmd.kind === 'start-task') {
+			return this._startTask(cmd as ITaskCommand);
+		}
 		if (cmd.kind !== 'start-run' || !cmd.requestId || !cmd.remoteUrl) {
 			return;
 		}
@@ -197,5 +224,136 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 				resolve();
 			});
 		});
+	}
+
+	// --- Agent tasks (the agent-first queue) -----------------------------------
+
+	/**
+	 * Run a queued agent task: a new local agent-host session in its own git
+	 * worktree on the task's branch, seeded with the task's prompt. The run is
+	 * recorded so the relay bridge links it to the task on the phone, and so
+	 * {@link _checkTaskRuns} can open the pull request when it finishes.
+	 */
+	private async _startTask(cmd: ITaskCommand): Promise<void> {
+		if (!cmd.taskId || !cmd.remoteUrl || !cmd.branch || !cmd.prompt || this._handled.has(cmd.taskId)) {
+			return;
+		}
+		const folder = await this._folderForRemote(cmd.remoteUrl);
+		if (!folder) {
+			return; // another window (or none) has this repo
+		}
+		this._handled.add(cmd.taskId);
+		try {
+			const type = SessionType.AgentHostClaude;
+			const openOptions = { type, position: ChatSessionPosition.Sidebar, displayName: 'Chat' };
+			const draft = getResourceForNewChatSession(openOptions);
+			const provider = getLocalAgentHostSessionProvider(draft);
+			if (!provider) {
+				throw new Error('the local agent host is not available');
+			}
+			// Worktree isolation on the task's exact branch; the host creates the
+			// worktree on the first send and falls back to a generated name if taken.
+			const backend = await this._provisionalSessions.applyConfigChange(draft, provider, folder, {
+				[SessionConfigKey.Isolation]: 'worktree',
+				[SessionConfigKey.WorktreeBranchName]: cmd.branch,
+			});
+			if (!backend) {
+				throw new Error('the repository folder is not trusted, or the agent host is unavailable');
+			}
+			const run: ICeliadorTaskRun = { taskId: cmd.taskId, title: cmd.title ?? cmd.branch, branch: cmd.branch, issue: cmd.issue, repoRoot: folder };
+			// Record against the draft first: the bridge may mirror the session before openChatSession returns.
+			setCeliadorTaskRun(draft, run);
+			const opened = await this._instantiationService.invokeFunction(accessor => openChatSession(accessor, { ...openOptions, sessionResource: draft }, { prompt: cmd.prompt! }));
+			if (opened && opened.toString() !== draft.toString()) {
+				setCeliadorTaskRun(opened, run);
+			}
+			this._logService.info(`[celiador-control] task ${cmd.taskId} running on ${cmd.branch}`);
+			await this._reportTask(cmd.taskId, { state: 'running' });
+		} catch (e) {
+			this._handled.delete(cmd.taskId);
+			const message = e instanceof Error ? e.message : String(e);
+			this._logService.warn(`[celiador-control] task ${cmd.taskId} failed to start: ${message}`);
+			await this._reportTask(cmd.taskId, { state: 'failed', error: `Couldn't start the run: ${message}` });
+		}
+	}
+
+	/** A finished task run: push its branch and open the pull request (once). */
+	private _checkTaskRuns(): void {
+		for (const [key, run] of celiadorTaskRunEntries()) {
+			if (run.finished) {
+				continue;
+			}
+			const session = this._sessionsService.model.sessions.find(s => s.resource.toString() === key);
+			if (!session) {
+				continue;
+			}
+			if (!run.worktree) {
+				void this._resolveWorktree(run);
+			}
+			if (session.status === ChatSessionStatus.Completed) {
+				run.finished = true;
+				void this._finishTask(key, run);
+			} else if (session.status === ChatSessionStatus.Failed) {
+				run.finished = true;
+				void this._reportTask(run.taskId, { state: 'failed', error: 'The agent run failed.' });
+			}
+		}
+	}
+
+	private async _resolveWorktree(run: ICeliadorTaskRun): Promise<URI | undefined> {
+		const path = await this._commandService.executeCommand<string | undefined>('celiador.taskWorktree', { repoRoot: run.repoRoot.fsPath, branch: run.branch }).catch(() => undefined);
+		if (path) {
+			run.worktree = URI.file(path);
+		}
+		return run.worktree;
+	}
+
+	private async _finishTask(key: string, run: ICeliadorTaskRun): Promise<void> {
+		try {
+			const worktree = run.worktree ?? await this._resolveWorktree(run);
+			if (!worktree) {
+				throw new Error(`couldn't find the run's worktree for branch ${run.branch} (was the name taken?)`);
+			}
+			const result = await this._commandService.executeCommand<{ ok: boolean; url?: string; error?: string }>('celiador.finishTask', { root: worktree.fsPath, title: run.title, issue: run.issue });
+			if (!result?.ok || !result.url) {
+				throw new Error(result?.error ?? 'opening the pull request failed');
+			}
+			await this._reportTask(run.taskId, { state: 'pr-open', prUrl: result.url });
+			this._logService.info(`[celiador-control] task ${run.taskId} opened ${result.url}`);
+		} catch (e) {
+			const message = e instanceof Error ? e.message : String(e);
+			this._logService.warn(`[celiador-control] task ${run.taskId} could not open its pull request: ${message}`);
+			await this._reportTask(run.taskId, { state: 'failed', error: message });
+		} finally {
+			deleteCeliadorTaskRun(key);
+		}
+	}
+
+	/** Tell the daemon how a task is doing; best-effort. */
+	private async _reportTask(taskId: string, status: { state: 'running' | 'pr-open' | 'failed'; prUrl?: string; error?: string }): Promise<void> {
+		const auth = await this._token();
+		if (!auth) {
+			return;
+		}
+		try {
+			await fetch(`${this._daemonUrl()}/api/tasks/${encodeURIComponent(taskId)}/status`, {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
+				body: JSON.stringify(status),
+			});
+		} catch (e) {
+			this._logService.trace(`[celiador-control] task status report failed: ${e}`);
+		}
+	}
+
+	/** The window folder whose origin remote is `remoteUrl`. */
+	private async _folderForRemote(remoteUrl: string): Promise<URI | undefined> {
+		for (const folder of this._workspaceService.getWorkspace().folders) {
+			const remote = await this._folderRemote(folder.uri);
+			if (remote && remote.toLowerCase() === remoteUrl.toLowerCase()) {
+				return folder.uri;
+			}
+		}
+		return undefined;
 	}
 }

@@ -33,6 +33,10 @@ export const enum SessionConfigKey {
 	Mode = 'mode',
 	/** `'worktreeBranchPrefix'` — host-owned prefix for the worktree branch name. */
 	WorktreeBranchPrefix = 'worktreeBranchPrefix',
+	// --- Start Celiador ---
+	/** `'worktreeBranchName'` — host-owned exact name for the branch an isolated worktree creates (an agent task's `<issue>-<slug>`); falls back to a generated name when it is taken. */
+	WorktreeBranchName = 'worktreeBranchName',
+	// --- End Celiador ---
 	/** `'worktreeIncludeFiles'` — host-owned `.gitignore`-syntax patterns for git-ignored files copied into a new worktree. */
 	WorktreeIncludeFiles = 'worktreeIncludeFiles',
 	/** `'worktreeSymlinkFolders'` — host-owned `.gitignore`-syntax patterns for git-ignored folders symlinked into a new worktree. */
@@ -122,6 +126,7 @@ const automationDefinitionOwnedConfigKeys = [
 	SessionConfigKey.Isolation,
 	SessionConfigKey.Branch,
 	SessionConfigKey.WorktreeBranchPrefix,
+	SessionConfigKey.WorktreeBranchName, // Celiador
 	SessionConfigKey.WorktreeIncludeFiles,
 	SessionConfigKey.WorktreeSymlinkFolders,
 	SessionConfigKey.PullRequestUrl,
