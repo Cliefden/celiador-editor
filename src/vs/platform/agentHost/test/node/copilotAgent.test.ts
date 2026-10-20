@@ -8253,7 +8253,7 @@ suite('CopilotAgent', () => {
 			assert.strictEqual(result.provisional, true);
 			const resultWorkingDirectory = result.resolvedWorkingDirectory;
 			assert.ok(resultWorkingDirectory);
-			const expected = URI.joinPath(userHome, '.copilot', 'chats', 'temp-fallback');
+			const expected = URI.joinPath(workspacelessChatsRoot(userHome), 'temp-fallback');
 			assert.strictEqual(resultWorkingDirectory.scheme, Schemas.file);
 			assert.strictEqual(resultWorkingDirectory.fsPath, expected.fsPath);
 			assert.deepStrictEqual(await fs.readdir(resultWorkingDirectory.fsPath), []);
@@ -8404,7 +8404,7 @@ suite('CopilotAgent', () => {
 			const userHome = URI.file(await fs.mkdtemp(`${os.tmpdir()}/qc-home-`));
 			const sessionId = 'qc-resume';
 			const session = AgentSession.uri('copilotcli', sessionId);
-			const scratchDir = URI.joinPath(userHome, '.copilot', 'chats', sessionId);
+			const scratchDir = URI.joinPath(workspacelessChatsRoot(userHome), sessionId);
 			const sessionDataService = disposables.add(new TestSessionDataService());
 			const db = sessionDataService.openDatabase(session);
 			await db.object.setMetadata('copilot.workingDirectory', scratchDir.toString());
@@ -8433,7 +8433,7 @@ suite('CopilotAgent', () => {
 				await agent.authenticate('https://api.github.com', 'token');
 				const session = AgentSession.uri('copilotcli', 'qc-dispose');
 				const result = await provisionSession(agent, { session });
-				const scratchDir = URI.joinPath(userHome, '.copilot', 'chats', 'qc-dispose');
+				const scratchDir = URI.joinPath(workspacelessChatsRoot(userHome), 'qc-dispose');
 				await fs.access(scratchDir.fsPath);
 				// No `workingDirectories` was supplied at creation, so the provider's
 				// own provisional record already carries `workspaceless: true`; chat
@@ -8454,7 +8454,7 @@ suite('CopilotAgent', () => {
 			const peer = URI.parse(buildChatUri(session, 'scratch-peer'));
 			const owner = disposables.add(new TestChatOwnerRef(session));
 			const peerContext = { ...exactChatContext(session, peer), owner };
-			const scratchExists = () => fs.access(URI.joinPath(userHome, '.copilot', 'chats', sessionId).fsPath).then(() => true, () => false);
+			const scratchExists = () => fs.access(URI.joinPath(workspacelessChatsRoot(userHome), sessionId).fsPath).then(() => true, () => false);
 			try {
 				await agent.authenticate('https://api.github.com', 'token');
 				await provisionSession(agent, { session });
@@ -15813,7 +15813,7 @@ suite('CopilotAgent', () => {
 
 	test('getChatMetadata infers workspace-less from the Copilot chats folder only when the host recorded no marker', async () => {
 		const userHome = URI.file('/home/user');
-		const chatDirectory = URI.joinPath(userHome, '.copilot', 'chats', '2026-09-23', 'app-chat').fsPath;
+		const chatDirectory = URI.joinPath(workspacelessChatsRoot(userHome), '2026-09-23', 'app-chat').fsPath;
 		const sessionDataService = disposables.add(new TestSessionDataService());
 		const db = sessionDataService.openDatabase(AgentSession.uri('copilotcli', 'host-owned'));
 		await db.object.setMetadata(AH_META_WORKSPACELESS_DB_KEY, 'false');
@@ -16682,7 +16682,7 @@ suite('CopilotAgent', () => {
 		test('marks a session working under the Copilot chats folder as workspace-less', async () => {
 			const userHome = URI.file(await fs.mkdtemp(`${os.tmpdir()}/workspaceless-discovery-home-`));
 			// The GitHub Copilot app nests its chat folders by date, not by session id.
-			const chatDirectory = join(userHome.fsPath, '.copilot', 'chats', '2026-09-23', 'congenial-happiness');
+			const chatDirectory = join(workspacelessChatsRoot(userHome).fsPath, '2026-09-23', 'congenial-happiness');
 			await fs.mkdir(chatDirectory, { recursive: true });
 			const workingDirectory = await fs.mkdtemp(`${os.tmpdir()}/workspaceless-discovery-cwd-`);
 			const sessionDataService = disposables.add(new TestSessionDataService());
@@ -19274,7 +19274,7 @@ suite('CopilotAgent', () => {
 			const session = AgentSession.uri('copilotcli', 'rollback-startup-session');
 			const sessionId = AgentSession.id(session);
 			const chat = defaultChatUri(session);
-			const scratchDir = URI.joinPath(userHome, '.copilot', 'chats', sessionId);
+			const scratchDir = URI.joinPath(workspacelessChatsRoot(userHome), sessionId);
 			try {
 				await agent.authenticate('https://api.github.com', 'token');
 				// No workingDirectories: `_resolveCreateWorkingDirectory` mkdir's the
@@ -19460,7 +19460,7 @@ suite('CopilotAgent', () => {
 			const session = AgentSession.uri('copilotcli', 'rollback-duplicate-session');
 			const sessionId = AgentSession.id(session);
 			const chat = defaultChatUri(session);
-			const scratchDir = URI.joinPath(userHome, '.copilot', 'chats', sessionId);
+			const scratchDir = URI.joinPath(workspacelessChatsRoot(userHome), sessionId);
 			try {
 				await agent.authenticate('https://api.github.com', 'token');
 
@@ -27309,7 +27309,7 @@ suite('CopilotAgent', () => {
 				await writeExtensionHostMarker(userHome, sessionId);
 				// Block mkdir(workspacelessChatsRoot) by placing a regular file at `~/.copilot/chats`.
 				const chatsRoot = workspacelessChatsRoot(userHome);
-				await fs.mkdir(join(userHome.fsPath, '.copilot'), { recursive: true });
+				await fs.mkdir(dirname(chatsRoot.fsPath), { recursive: true });
 				await fs.writeFile(chatsRoot.fsPath, 'not-a-directory', 'utf8');
 
 				await assert.rejects(() => ensureDefaultChatAdopted(agent, session));

@@ -19,6 +19,7 @@ import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { DisposableMap, DisposableStore, ImmortalReference, toDisposable, type IReference } from '../../../../../../base/common/lifecycle.js';
 import { autorun, constObservable, derived, ISettableObservable, observableFromEvent, observableValue, type IObservable } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import { workspacelessScratchDir } from '../../../../../../platform/agentHost/common/workspacelessScratchDir.js';
 import { ResourceMap } from '../../../../../../base/common/map.js';
 import { extUriIgnorePathCase, isEqual } from '../../../../../../base/common/resources.js';
 import { mock, upcastPartial } from '../../../../../../base/test/common/mock.js';
@@ -13511,14 +13512,14 @@ suite('LocalAgentHostSessionsProvider', () => {
 
 		const session = provider.createQuickChat(provider.sessionTypes[0].id);
 		const rawId = AgentSession.id(session.resource);
-		const resource = URI.file(`/home/test/.copilot/chats/${rawId}/files/plan.md`);
+		const resource = URI.joinPath(workspacelessScratchDir(URI.file('/home/test'), rawId), 'files', 'plan.md');
 
 		const home = labelService.getUriHome(resource);
 		assert.deepStrictEqual({
 			home: home?.toString(),
 			label: home ? labelService.getUriLabel(home) : undefined,
 		}, {
-			home: URI.file(`/home/test/.copilot/chats/${rawId}`).toString(),
+			home: workspacelessScratchDir(URI.file('/home/test'), rawId).toString(),
 			label: 'Copilot/Session',
 		});
 	});

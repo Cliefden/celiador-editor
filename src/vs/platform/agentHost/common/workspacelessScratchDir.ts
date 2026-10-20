@@ -5,6 +5,14 @@
 
 import { joinPath } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
+import product from '../../product/common/product.js';
+
+// --- Start Celiador ---
+// A branded build keeps workspace-less chats under its own data folder
+// (`~/.celiador/chats`) instead of creating a Copilot-named `~/.copilot` in the
+// user's home directory. Upstream (Code - OSS) keeps `~/.copilot`.
+const chatsParentFolderName = product.nameShort !== 'Code - OSS' && product.dataFolderName ? product.dataFolderName : '.copilot';
+// --- End Celiador ---
 
 /**
  * Folder holding the working directories of chats that have no user workspace.
@@ -12,7 +20,7 @@ import { URI } from '../../../base/common/uri.js';
  * the GitHub Copilot app) nest theirs differently, such as `<date>/<name>`.
  */
 export function workspacelessChatsRoot(userHome: URI): URI {
-	return joinPath(userHome, '.copilot', 'chats');
+	return joinPath(userHome, chatsParentFolderName, 'chats');
 }
 
 export function workspacelessScratchDir(userHome: URI, sessionId: string): URI {

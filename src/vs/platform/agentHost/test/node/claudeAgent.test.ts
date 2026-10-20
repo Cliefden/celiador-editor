@@ -33,6 +33,7 @@ import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
+import { workspacelessChatsRoot } from '../../common/workspacelessScratchDir.js';
 import { generateUuid, isUUID } from '../../../../base/common/uuid.js';
 import { isCancellationError } from '../../../../base/common/errors.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
@@ -2532,7 +2533,7 @@ suite('ClaudeAgent', () => {
 			const sessionId = created.sdkSessionId;
 			// The scratch dir is keyed by the AH session id — the SDK
 			// conversation id is minted independently by the chat seam.
-			const expected = URI.joinPath(userHome, '.copilot', 'chats', AgentSession.id(created.session));
+			const expected = URI.joinPath(workspacelessChatsRoot(userHome), AgentSession.id(created.session));
 			assert.strictEqual(created.resolvedWorkingDirectory?.fsPath, expected.fsPath);
 			await fs.access(expected.fsPath);
 
@@ -10121,7 +10122,7 @@ suite('ClaudeAgent — Phase 11 customizations', () => {
 			const created = await createSession(agent, {});
 			const additionalChat = URI.parse(buildChatUri(created.session.toString(), 'chat-1'));
 			const additional = await agent.chats.createChat(additionalChat, chatContext(additionalChat), {});
-			const expected = URI.joinPath(userHome, '.copilot', 'chats', AgentSession.id(created.session));
+			const expected = URI.joinPath(workspacelessChatsRoot(userHome), AgentSession.id(created.session));
 
 			const additionalId = AgentSession.id(additional!.backingSession!);
 			sdk.nextQueryMessages = [makeSystemInitMessage(additionalId), makeResultSuccess(additionalId)];
