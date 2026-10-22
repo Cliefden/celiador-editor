@@ -85,6 +85,8 @@ interface ITaskCommand {
 	readonly prompt?: string;
 	readonly title?: string;
 	readonly issue?: { readonly number: number; readonly url: string };
+	/** The daemon already commented on the issue (as the Celiador GitHub App). */
+	readonly commented?: boolean;
 }
 
 type PhoneRunEvent = {
@@ -321,7 +323,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			await this._reportTask(cmd.taskId, { state: 'running' });
 			// The issue's "picked up" comment: best-effort, through the extension's
 			// GitHub sign-in (or gh), so watchers of the issue see it is in motion.
-			if (cmd.issue && this._configurationService.getValue<boolean>(TASK_ISSUE_COMMENT_SETTING) !== false) {
+			if (cmd.issue && !cmd.commented && this._configurationService.getValue<boolean>(TASK_ISSUE_COMMENT_SETTING) !== false) {
 				const body = `Celiador picked this up: an agent is working on it in a worktree on branch \`${cmd.branch}\` and will open a pull request linked here. Approvals and questions go to the Celiador queue.`;
 				void this._commandService.executeCommand<{ ok: boolean; error?: string }>('celiador.commentOnIssue', { remoteUrl: cmd.remoteUrl, number: cmd.issue.number, body })
 					.then(result => {
