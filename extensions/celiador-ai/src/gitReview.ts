@@ -13,13 +13,15 @@ import * as vscode from 'vscode';
 
 /** Arguments the bridge passes through from the relayed git.* command. */
 interface GitReviewArgs {
-  kind: 'git.status' | 'git.diff' | 'git.commit' | 'git.revert' | 'git.push' | 'git.pr';
+  kind: 'git.status' | 'git.diff' | 'git.commit' | 'git.revert' | 'git.push' | 'git.pr' | 'git.merge';
   path?: string;
   message?: string;
   paths?: string[];
   title?: string;
   body?: string;
   base?: string;
+  /** git.merge: GitHub's merge method (a merge commit when unset). */
+  method?: 'merge' | 'squash' | 'rebase';
   /** Celiador agent task: the run's own worktree; the main checkout when unset. */
   root?: string;
 }
@@ -35,6 +37,8 @@ interface GitReviewResult {
   remote?: string;
   url?: string;
   created?: boolean;
+  /** git.merge: true once GitHub reports the pull request merged. */
+  merged?: boolean;
 }
 
 // Minimal slices of the vscode.git API (extensions/git/src/api/git.d.ts).
@@ -96,14 +100,15 @@ async function githubCliToken(): Promise<string | undefined> {
  * else the GitHub CLI's. Without either we don't prompt from a background relay
  * command — the phone gets a compare link to finish in the browser instead.
  */
-async function openPullRequest(target: { owner: string; repo: string }, head: string, args: GitReviewArgs): Promise<GitReviewResult> {
-  const title = args.title!.trim();
+/** The GitHub token to act with: the editor's GitHub sign-in, else the gh CLI's. */
+async function githubToken(): Promise<string | undefined> {
   const session = await vscode.authentication.getSession('github', ['repo'], { silent: true });
-  const token = session?.accessToken ?? await githubCliToken();
-  const compareUrl = `https://github.com/${target.owner}/${target.repo}/compare/${encodeURIComponent(head)}?expand=1&title=${encodeURIComponent(title)}`;
-  if (!token) {return { ok: true, url: compareUrl, created: false };}
+  return session?.accessToken ?? await githubCliToken();
+}
 
-  const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> => {
+/** A minimal GitHub REST caller bound to `token`. */
+function githubApi(token: string): (method: string, path: string, body?: unknown) => Promise<{ status: number; json: any }> {
+  return async (method, path, body) => {
     const res = await fetch(`https://api.github.com${path}`, {
       method,
       headers: {
@@ -116,6 +121,35 @@ async function openPullRequest(target: { owner: string; repo: string }, head: st
     });
     return { status: res.status, json: await res.json().catch(() => ({})) };
   };
+}
+
+/**
+ * Merge the open pull request for `head` — the phone's "Approve and merge".
+ * Fails plainly without a GitHub sign-in: unlike opening a PR there is no
+ * browser fallback that keeps the loop on the phone.
+ */
+async function mergePullRequest(target: { owner: string; repo: string }, head: string, method: 'merge' | 'squash' | 'rebase' = 'merge'): Promise<GitReviewResult> {
+  const token = await githubToken();
+  if (!token) {return { ok: false, error: 'merging needs a GitHub sign-in in the editor, or `gh auth login` on this machine' };}
+  const api = githubApi(token);
+  const repoPath = `/repos/${target.owner}/${target.repo}`;
+  const open = await api('GET', `${repoPath}/pulls?state=open&head=${encodeURIComponent(`${target.owner}:${head}`)}`);
+  const pr = Array.isArray(open.json) ? open.json[0] : undefined;
+  if (typeof pr?.number !== 'number') {return { ok: false, error: `no open pull request for ${head}` };}
+  const merged = await api('PUT', `${repoPath}/pulls/${pr.number}/merge`, { merge_method: method });
+  if (merged.status === 200 && merged.json?.merged === true) {
+    return { ok: true, merged: true, sha: typeof merged.json.sha === 'string' ? merged.json.sha : undefined, url: pr.html_url };
+  }
+  const detail = merged.json?.message;
+  return { ok: false, merged: false, url: pr.html_url, error: typeof detail === 'string' ? detail : `GitHub returned ${merged.status}` };
+}
+
+async function openPullRequest(target: { owner: string; repo: string }, head: string, args: GitReviewArgs): Promise<GitReviewResult> {
+  const title = args.title!.trim();
+  const token = await githubToken();
+  const compareUrl = `https://github.com/${target.owner}/${target.repo}/compare/${encodeURIComponent(head)}?expand=1&title=${encodeURIComponent(title)}`;
+  if (!token) {return { ok: true, url: compareUrl, created: false };}
+  const api = githubApi(token);
 
   const repoPath = `/repos/${target.owner}/${target.repo}`;
   let base = args.base?.trim();
@@ -264,6 +298,15 @@ async function execute(args: GitReviewArgs): Promise<GitReviewResult> {
       const target = parseGitHubRemote(remote?.pushUrl ?? remote?.fetchUrl);
       if (!target) {return { ok: false, error: `the branch's remote is not on GitHub` };}
       return openPullRequest(target, branch, args);
+    }
+    case 'git.merge': {
+      await repo.status();
+      const branch = repo.state.HEAD?.name;
+      if (!branch) {return { ok: false, error: 'detached HEAD — check out a branch first' };}
+      const remote = pickRemote(repo);
+      const target = parseGitHubRemote(remote?.pushUrl ?? remote?.fetchUrl);
+      if (!target) {return { ok: false, error: `the branch's remote is not on GitHub` };}
+      return mergePullRequest(target, branch, args.method);
     }
   }
 }

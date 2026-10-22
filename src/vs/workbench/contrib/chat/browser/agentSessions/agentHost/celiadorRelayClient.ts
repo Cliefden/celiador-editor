@@ -43,13 +43,15 @@ export interface IRelayCommand {
 	readonly body?: string;
 	/** git.pr: the base branch (defaults to the repository's default branch). */
 	readonly base?: string;
+	/** git.merge: how GitHub should merge the pull request (defaults to a merge commit). */
+	readonly method?: 'merge' | 'squash' | 'rebase';
 }
 
 /** The kinds of filesystem command the phone can round-trip to this runner. */
 export type RelayFsKind = 'fs.list' | 'fs.read' | 'fs.write';
 
 /** The kinds of run-review (git) command the phone can round-trip to this runner. */
-export type RelayGitKind = 'git.status' | 'git.diff' | 'git.commit' | 'git.revert' | 'git.push' | 'git.pr';
+export type RelayGitKind = 'git.status' | 'git.diff' | 'git.commit' | 'git.revert' | 'git.push' | 'git.pr' | 'git.merge';
 
 /** The per-kind arguments of a relayed git command (see {@link IRelayCommand}). */
 export interface IRelayGitArgs {
@@ -59,6 +61,7 @@ export interface IRelayGitArgs {
 	readonly title?: string;
 	readonly body?: string;
 	readonly base?: string;
+	readonly method?: 'merge' | 'squash' | 'rebase';
 }
 
 /** Debounce window for coalescing high-frequency events (streamed deltas). */
@@ -335,8 +338,8 @@ export class CeliadorRelayClient extends Disposable {
 			this._options.onApprovalDecision?.(cmd.requestId, cmd.kind === 'approve');
 		} else if ((cmd.kind === 'fs.list' || cmd.kind === 'fs.read' || cmd.kind === 'fs.write') && cmd.requestId) {
 			this._options.onFsCommand?.(cmd.kind, cmd.requestId, cmd.path ?? '', cmd.content);
-		} else if ((cmd.kind === 'git.status' || cmd.kind === 'git.diff' || cmd.kind === 'git.commit' || cmd.kind === 'git.revert' || cmd.kind === 'git.push' || cmd.kind === 'git.pr') && cmd.requestId) {
-			this._options.onGitCommand?.(cmd.kind, cmd.requestId, { path: cmd.path, message: cmd.message, paths: cmd.paths, title: cmd.title, body: cmd.body, base: cmd.base });
+		} else if ((cmd.kind === 'git.status' || cmd.kind === 'git.diff' || cmd.kind === 'git.commit' || cmd.kind === 'git.revert' || cmd.kind === 'git.push' || cmd.kind === 'git.pr' || cmd.kind === 'git.merge') && cmd.requestId) {
+			this._options.onGitCommand?.(cmd.kind, cmd.requestId, { path: cmd.path, message: cmd.message, paths: cmd.paths, title: cmd.title, body: cmd.body, base: cmd.base, method: cmd.method });
 		}
 	}
 

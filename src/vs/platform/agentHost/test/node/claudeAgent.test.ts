@@ -93,6 +93,7 @@ import { IAgentSdkDownloader } from '../../node/agentSdkDownloader.js';
 import { RecordingAgentSdkDownloader } from './testAgentSdkDownloader.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import { ClaudeProxyService, IClaudeProxyCreditsReport, IClaudeProxyHandle, IClaudeProxyService } from '../../node/claude/claudeProxyService.js';
+import { ICeliadorDaemonProxyHandle, ICeliadorDaemonProxySeed, ICeliadorDaemonProxyService } from '../../node/claude/celiadorDaemonProxyService.js';
 import { resolvePromptToContentBlocks } from '../../node/claude/claudePromptResolver.js';
 import { CopilotApiService, ICopilotApiService, type ICopilotApiServiceRequestOptions } from '../../node/shared/copilotApiService.js';
 import { AGENT_MERGE_GITHUB_TOOL_RESTRICTION } from '../../node/shared/agentMergeToolRestrictions.js';
@@ -375,6 +376,30 @@ class FakeClaudeProxyService implements IClaudeProxyService {
 	}
 
 	dispose(): void { this.onDidReportCreditsEmitter.dispose(); }
+}
+
+/** Celiador: records daemon-proxy leases and token re-points instead of binding a port. */
+class FakeCeliadorDaemonProxyService implements ICeliadorDaemonProxyService {
+	declare readonly _serviceBrand: undefined;
+
+	readonly baseUrl = 'http://127.0.0.1:1';
+	readonly nonce = 'daemon-nonce';
+	readonly startCalls: ICeliadorDaemonProxySeed[] = [];
+	/** Tokens handed to `setToken` after the lease was taken. */
+	readonly tokens: string[] = [];
+	disposeCount = 0;
+
+	async start(seed: ICeliadorDaemonProxySeed): Promise<ICeliadorDaemonProxyHandle> {
+		this.startCalls.push(seed);
+		return {
+			baseUrl: this.baseUrl,
+			nonce: this.nonce,
+			setToken: token => { this.tokens.push(token); },
+			dispose: () => { this.disposeCount++; },
+		};
+	}
+
+	dispose(): void { }
 }
 
 class FakeAgentHostAuthenticationService extends mock<IAgentHostAuthenticationService>() {
@@ -1107,6 +1132,7 @@ class RecordingOTelService implements IAgentHostOTelService {
 interface ITestContext {
 	readonly agent: ClaudeAgent;
 	readonly proxy: FakeClaudeProxyService;
+	readonly daemonProxy: FakeCeliadorDaemonProxyService;
 	readonly api: FakeCopilotApiService;
 	readonly sdk: FakeClaudeAgentSdkService;
 	readonly sessionData: RecordingSessionDataService;
@@ -1143,6 +1169,7 @@ function createTestContext(
 	overrides?: { logService?: ILogService; database?: TestSessionDatabase; sessionDataService?: ISessionDataService; rootConfig?: Record<string, unknown>; userHome?: URI; gitHubEndpointService?: IAgentHostGitHubEndpointService; copilotApiService?: ICopilotApiService; claudeProxyService?: IClaudeProxyService; checkpointService?: IAgentHostCheckpointService; nativeAccount?: AccountInfo; startupPerformance?: IAgentHostStartupPerformance },
 ): ITestContext {
 	const proxy = new FakeClaudeProxyService();
+	const daemonProxy = new FakeCeliadorDaemonProxyService();
 	const api = new FakeCopilotApiService();
 	api.models = async () => [...ALL_MODELS];
 	const sdk = new FakeClaudeAgentSdkService();
@@ -1176,6 +1203,7 @@ function createTestContext(
 		[IAgentHostStartupPerformance, overrides?.startupPerformance ?? NullAgentHostStartupPerformance],
 		[ICopilotApiService, overrides?.copilotApiService ?? api],
 		[IClaudeProxyService, overrides?.claudeProxyService ?? proxy],
+		[ICeliadorDaemonProxyService, daemonProxy],
 		[ISessionDataService, sessionData],
 		[IClaudeAgentSdkService, sdk],
 		[IAgentSdkDownloader, sdkDownloader],
@@ -1233,7 +1261,7 @@ function createTestContext(
 	chats.changeAgent = (chat, nextAgent, context) => changeAgent(chat, nextAgent, toChatContext(chat, context));
 	const getMessages = chats.getMessages.bind(agent.chats);
 	chats.getMessages = (chat, context) => getMessages(chat, toChatContext(chat, context));
-	return { agent, proxy, api, sdk, sessionData, stateManager, configService, otelService, instantiationService, fileService, sdkDownloader };
+	return { agent, proxy, daemonProxy, api, sdk, sessionData, stateManager, configService, otelService, instantiationService, fileService, sdkDownloader };
 }
 
 /** Drains the microtask queue so awaited refresh writes settle. */
@@ -2220,6 +2248,7 @@ suite('ClaudeAgent', () => {
 		// `_proxyHandle` unset when start() throws (a soft failure), so a
 		// retry still sees the token as new and re-attempts start().
 		const proxy = new FakeClaudeProxyService();
+		const daemonProxy = new FakeCeliadorDaemonProxyService();
 		const api = new FakeCopilotApiService();
 		api.models = async () => [...ALL_MODELS];
 
@@ -2244,6 +2273,7 @@ suite('ClaudeAgent', () => {
 			...createTestAgentStateServices(disposables),
 			[ICopilotApiService, api],
 			[IClaudeProxyService, proxy],
+			[ICeliadorDaemonProxyService, daemonProxy],
 			[ISessionDataService, createNullSessionDataService()],
 			[IClaudeAgentSdkService, new FakeClaudeAgentSdkService()],
 			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
@@ -2311,6 +2341,7 @@ suite('ClaudeAgent', () => {
 
 	test('dispose disposes the proxy handle and is idempotent', async () => {
 		const proxy = new FakeClaudeProxyService();
+		const daemonProxy = new FakeCeliadorDaemonProxyService();
 		const api = new FakeCopilotApiService();
 		api.models = async () => [];
 
@@ -2319,6 +2350,7 @@ suite('ClaudeAgent', () => {
 			...createTestAgentStateServices(disposables),
 			[ICopilotApiService, api],
 			[IClaudeProxyService, proxy],
+			[ICeliadorDaemonProxyService, daemonProxy],
 			[ISessionDataService, createNullSessionDataService()],
 			[IClaudeAgentSdkService, new FakeClaudeAgentSdkService()],
 			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
@@ -2380,6 +2412,7 @@ suite('ClaudeAgent', () => {
 		// while token-B's refresh runs to completion. Phase 4's stale-
 		// write guard MUST drop the late token-A result.
 		const proxy = new FakeClaudeProxyService();
+		const daemonProxy = new FakeCeliadorDaemonProxyService();
 		const api = new FakeCopilotApiService();
 		const tokAModels = new DeferredPromise<CCAModel[]>();
 		api.models = (token: string) => token === 'tokA'
@@ -2391,6 +2424,7 @@ suite('ClaudeAgent', () => {
 			...createTestAgentStateServices(disposables),
 			[ICopilotApiService, api],
 			[IClaudeProxyService, proxy],
+			[ICeliadorDaemonProxyService, daemonProxy],
 			[ISessionDataService, createNullSessionDataService()],
 			[IClaudeAgentSdkService, new FakeClaudeAgentSdkService()],
 			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
@@ -2419,6 +2453,7 @@ suite('ClaudeAgent', () => {
 		// A GitHub sign-in starts a merged refresh that hangs; the Celiador daemon
 		// token then publishes the daemon model. The late merged write must be dropped.
 		const proxy = new FakeClaudeProxyService();
+		const daemonProxy = new FakeCeliadorDaemonProxyService();
 		const api = new FakeCopilotApiService();
 		const ghModels = new DeferredPromise<CCAModel[]>();
 		api.models = () => ghModels.p;
@@ -2428,6 +2463,7 @@ suite('ClaudeAgent', () => {
 			...createTestAgentStateServices(disposables),
 			[ICopilotApiService, api],
 			[IClaudeProxyService, proxy],
+			[ICeliadorDaemonProxyService, daemonProxy],
 			[ISessionDataService, createNullSessionDataService()],
 			[IClaudeAgentSdkService, new FakeClaudeAgentSdkService()],
 			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
@@ -4521,6 +4557,7 @@ suite('ClaudeAgent', () => {
 		};
 
 		const proxy = new FakeClaudeProxyService();
+		const daemonProxy = new FakeCeliadorDaemonProxyService();
 		const api = new FakeCopilotApiService();
 		api.models = async () => [...ALL_MODELS];
 		const sdk = new FakeClaudeAgentSdkService();
@@ -4533,6 +4570,7 @@ suite('ClaudeAgent', () => {
 			[ILogService, logService],
 			[ICopilotApiService, api],
 			[IClaudeProxyService, proxy],
+			[ICeliadorDaemonProxyService, daemonProxy],
 			[ISessionDataService, sessionData],
 			[IClaudeAgentSdkService, sdk],
 			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
@@ -5905,6 +5943,7 @@ suite('ClaudeAgent', () => {
 		};
 
 		const proxy = new FakeClaudeProxyService();
+		const daemonProxy = new FakeCeliadorDaemonProxyService();
 		const api = new FakeCopilotApiService();
 		api.models = async () => [...ALL_MODELS];
 		const sdk = new FakeClaudeAgentSdkService();
@@ -5918,6 +5957,7 @@ suite('ClaudeAgent', () => {
 			[ILogService, logService],
 			[ICopilotApiService, api],
 			[IClaudeProxyService, proxy],
+			[ICeliadorDaemonProxyService, daemonProxy],
 			[ISessionDataService, sessionData],
 			[IClaudeAgentSdkService, sdk],
 			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
@@ -6744,9 +6784,10 @@ suite('ClaudeAgent — per-session provider', () => {
 		});
 	});
 
-	test('Celiador: a refreshed daemon token rebuilds a live daemon session onto the new token at the next send', async () => {
-		// The daemon token expires hourly and is baked into the SDK subprocess env;
-		// a session older than the token would otherwise 401 on every later turn.
+	test('Celiador: a daemon session runs through the daemon proxy and a refreshed token re-points the proxy without a rebuild', async () => {
+		// The daemon token expires hourly. The subprocess only ever holds the
+		// proxy nonce, so a refresh reaches a running turn through the proxy
+		// instead of needing a rebuild at the next send.
 		const ctx = createTestContext(disposables);
 		await ctx.agent.authenticate('https://celiador.ai/api/anthropic', 'daemon-token-1');
 		await tick();
@@ -6760,15 +6801,29 @@ suite('ClaudeAgent — per-session provider', () => {
 		ctx.sdk.nextQueryMessages = [makeSystemInitMessage(sessionId), makeResultSuccess(sessionId)];
 		await ctx.agent.chats.sendMessage(chat, 'again', undefined, undefined, 'turn-2', undefined, undefined, chatContext(chat));
 
+		// Every subprocess launch (the first, and any resume rebuild a later turn
+		// needs) points at the proxy on the per-session nonce; the user's token
+		// never enters the subprocess, and the refresh reached the proxy instead.
+		const baseUrlOf = (options: Options | undefined) => {
+			const settings = options?.settings;
+			return settings && typeof settings !== 'string' ? settings.env?.ANTHROPIC_BASE_URL : undefined;
+		};
 		assert.deepStrictEqual({
-			startups: ctx.sdk.startupCallCount,
+			baseUrls: ctx.sdk.capturedStartupOptions.map(baseUrlOf),
 			tokens: ctx.sdk.capturedStartupOptions.map(proxyAuthTokenOf),
-			resume: ctx.sdk.capturedStartupOptions[1]?.resume,
+			proxy: { starts: ctx.daemonProxy.startCalls, tokens: ctx.daemonProxy.tokens, disposed: ctx.daemonProxy.disposeCount },
 		}, {
-			startups: 2,
-			tokens: ['daemon-token-1', 'daemon-token-2'],
-			resume: sessionId,
+			baseUrls: ctx.sdk.capturedStartupOptions.map(() => ctx.daemonProxy.baseUrl),
+			tokens: ctx.sdk.capturedStartupOptions.map(() => `${ctx.daemonProxy.nonce}.${sessionId}`),
+			proxy: { starts: [{ gatewayUrl: 'https://celiador.ai/api/anthropic', token: 'daemon-token-1' }], tokens: ['daemon-token-2'], disposed: 0 },
 		});
+	});
+
+	test('Celiador: signing out of the daemon releases the daemon proxy', async () => {
+		const ctx = createTestContext(disposables);
+		await ctx.agent.authenticate('https://celiador.ai/api/anthropic', 'daemon-token-1');
+		await ctx.agent.authenticate('https://celiador.ai/api/anthropic', '');
+		assert.deepStrictEqual({ starts: ctx.daemonProxy.startCalls.length, disposed: ctx.daemonProxy.disposeCount }, { starts: 1, disposed: 1 });
 	});
 
 	test('a same-transport model change still hot-swaps the live query (no rebuild)', async () => {
@@ -8886,6 +8941,7 @@ suite('ClaudeAgent — Phase 11 customizations', () => {
 
 	function buildCtxWith(pluginManager: FakeAgentPluginManager): ITestContext {
 		const proxy = new FakeClaudeProxyService();
+		const daemonProxy = new FakeCeliadorDaemonProxyService();
 		const api = new FakeCopilotApiService();
 		api.models = async () => [...ALL_MODELS];
 		const sdk = new FakeClaudeAgentSdkService();
@@ -8930,6 +8986,7 @@ suite('ClaudeAgent — Phase 11 customizations', () => {
 			[ILogService, logService],
 			[ICopilotApiService, api],
 			[IClaudeProxyService, proxy],
+			[ICeliadorDaemonProxyService, daemonProxy],
 			[ISessionDataService, sessionData],
 			[IClaudeAgentSdkService, sdk],
 			[IAgentSdkDownloader, sdkDownloader],
@@ -8980,7 +9037,7 @@ suite('ClaudeAgent — Phase 11 customizations', () => {
 				?? (chat.scheme === 'ahp-chat' ? URI.parse(requireMintedTestChatOwner(chat.toString())) : chat);
 			return sendMessage(chat, prompt, workingDirectoriesOrDirectory, attachments, turnId, senderClientId, clientType, { ...createAgentChatContext(stateManager, authenticationService, session, chat, stateManager.resolveChatStorageResource(session.toString(), chat.toString()), undefined), ...explicit });
 		};
-		return { agent, proxy, api, sdk, sessionData, stateManager, configService, otelService, instantiationService, fileService, sdkDownloader };
+		return { agent, proxy, daemonProxy, api, sdk, sessionData, stateManager, configService, otelService, instantiationService, fileService, sdkDownloader };
 	}
 
 	function publishReducerCustomizations(stateManager: AgentHostStateManager, session: URI, customizations: readonly Customization[]): void {
