@@ -534,10 +534,17 @@ export class AgentHostSessionListStore extends Disposable {
 	 * directories alone would hide them from a window opened on that repository.
 	 * The marker has to outlive adoption: a migrated session is still a legacy
 	 * session and must not drop out of the list the moment it migrates.
+	 *
+	 * Celiador: a worktree-isolated session is matched by its repository root
+	 * too, not only a legacy one. The host records that root as the session's
+	 * project, and the worktree itself lives beside the repository (outside the
+	 * window's folder), so without this an agent task run in its own worktree is
+	 * invisible to the window that started it — and to the relay bridge and the
+	 * task finisher, which read this model.
 	 */
 	private _containmentCandidates(summary: SessionSummary): readonly URI[] {
 		const candidates = summary.workingDirectories?.map(directory => URI.parse(directory)) ?? [];
-		if (summary.project?.uri && readSessionMatchesByProjectRoot(summary._meta)) {
+		if (summary.project?.uri) {
 			const project = URI.parse(summary.project.uri);
 			// A project can be a remote (e.g. `https://github.com/owner/repo`), whose
 			// `fsPath` is not a location on disk and would silently never match.

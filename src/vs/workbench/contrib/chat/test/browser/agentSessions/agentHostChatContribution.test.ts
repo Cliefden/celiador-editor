@@ -5623,7 +5623,10 @@ suite('AgentHostChatContribution', () => {
 			assert.deepStrictEqual(listController.items.map(item => item.label), ['Contains folder']);
 		});
 
-		test('only legacy CLI worktree sessions are shown in a window opened on their repository folder', async () => {
+		// Celiador: every worktree session of the repository is listed, not only a
+		// legacy CLI one — the agent task queue runs each issue in its own worktree
+		// and the window that started it (and the relay bridge) must see the run.
+		test('worktree sessions are shown in a window opened on their repository folder', async () => {
 			const { instantiationService, agentHostService } = createTestServices(disposables);
 
 			const folder = URI.file('/src/repo');
@@ -5665,7 +5668,7 @@ suite('AgentHostChatContribution', () => {
 			const listController = createSessionListController(disposables, instantiationService, agentHostService);
 			await listController.refresh(CancellationToken.None);
 
-			assert.deepStrictEqual(listController.items.map(item => item.label), ['Legacy worktree session']);
+			assert.deepStrictEqual(listController.items.map(item => item.label).sort(), ['Legacy worktree session', 'Worktree session']);
 		});
 
 		test('a migrated legacy worktree session stays listed after adoption clears the adoptable marker', async () => {

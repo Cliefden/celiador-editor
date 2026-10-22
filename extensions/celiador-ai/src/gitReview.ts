@@ -80,21 +80,34 @@ function parseGitHubRemote(url: string | undefined): { owner: string; repo: stri
 }
 
 /**
- * Open (or find) the pull request for `head` with the editor's GitHub sign-in.
- * Without a signed-in GitHub session we don't prompt from a background relay
+ * The GitHub CLI's token, when `gh` is installed and signed in. Agent task runs
+ * finish in the background, where prompting for the editor's GitHub sign-in is
+ * not an option; most developers who push with git already have `gh auth login`
+ * done, so that sign-in opens the pull request instead.
+ */
+async function githubCliToken(): Promise<string | undefined> {
+  const { execFile } = await import('child_process');
+  return new Promise<string | undefined>((resolve) =>
+    execFile('gh', ['auth', 'token'], { timeout: 10_000 }, (err, stdout) => resolve(err ? undefined : stdout.trim() || undefined)));
+}
+
+/**
+ * Open (or find) the pull request for `head` with the editor's GitHub sign-in,
+ * else the GitHub CLI's. Without either we don't prompt from a background relay
  * command — the phone gets a compare link to finish in the browser instead.
  */
 async function openPullRequest(target: { owner: string; repo: string }, head: string, args: GitReviewArgs): Promise<GitReviewResult> {
   const title = args.title!.trim();
   const session = await vscode.authentication.getSession('github', ['repo'], { silent: true });
+  const token = session?.accessToken ?? await githubCliToken();
   const compareUrl = `https://github.com/${target.owner}/${target.repo}/compare/${encodeURIComponent(head)}?expand=1&title=${encodeURIComponent(title)}`;
-  if (!session) {return { ok: true, url: compareUrl, created: false };}
+  if (!token) {return { ok: true, url: compareUrl, created: false };}
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> => {
     const res = await fetch(`https://api.github.com${path}`, {
       method,
       headers: {
-        authorization: `Bearer ${session.accessToken}`,
+        authorization: `Bearer ${token}`,
         accept: 'application/vnd.github+json',
         'content-type': 'application/json',
         'user-agent': 'celiador-editor',
