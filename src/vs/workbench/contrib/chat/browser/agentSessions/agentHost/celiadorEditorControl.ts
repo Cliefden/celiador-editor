@@ -7,8 +7,13 @@ import { CancellationTokenSource } from '../../../../../../base/common/cancellat
 import { Disposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { joinPath } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import { localize } from '../../../../../../nls.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
+import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../../../platform/configuration/common/configurationRegistry.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { Registry } from '../../../../../../platform/registry/common/platform.js';
+import { ClaudeSessionConfigKey } from '../../../../../../platform/agentHost/common/claudeSessionConfigKeys.js';
 import { SessionConfigKey } from '../../../../../../platform/agentHost/common/sessionConfigKeys.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
@@ -24,6 +29,32 @@ import { getLocalAgentHostSessionProvider } from './agentHostSessionUri.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
 import { celiadorTaskRunEntries, deleteCeliadorTaskRun, setCeliadorTaskRun, type ICeliadorTaskRun } from './celiadorTaskRuns.js';
 import { normalizeToHttps, parseRemoteUrl } from './celiadorWorkspacePresence.js';
+
+/**
+ * Celiador: how much an agent task run may do without asking. Tasks run while
+ * you are away, so the default is Claude's `auto` mode — it decides per tool
+ * call, approving the routine ones (reads, lint, tests, a commit on the task's
+ * own branch) and asking for the risky ones — which keeps the phone's queue to
+ * real questions and finished pull requests rather than a tap per command.
+ */
+const TASK_PERMISSION_MODE_SETTING = 'celiador.agentTasks.permissionMode';
+
+Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
+	id: 'celiador',
+	title: localize('celiador.configuration.title', "Celiador"),
+	properties: {
+		[TASK_PERMISSION_MODE_SETTING]: {
+			type: 'string',
+			enum: ['auto', 'default'],
+			enumDescriptions: [
+				localize('celiador.agentTasks.permissionMode.auto', "Claude decides per tool call: routine commands run, risky ones ask you on the phone."),
+				localize('celiador.agentTasks.permissionMode.default', "Every terminal command asks for approval, as in a regular chat."),
+			],
+			default: 'auto',
+			description: localize('celiador.agentTasks.permissionMode', "How much an agent task (a queued GitHub issue run in its own worktree) may do without asking."),
+		},
+	},
+});
 
 type PhoneRunClassification = {
 	seeded: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Whether the phone sent a first prompt with the run request or opened an idle chat.' };
@@ -79,6 +110,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 
 	constructor(
 		@ICommandService private readonly _commandService: ICommandService,
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IAuthenticationService private readonly _authenticationService: IAuthenticationService,
 		@IWorkspaceContextService private readonly _workspaceService: IWorkspaceContextService,
 		@IFileService private readonly _fileService: IFileService,
@@ -253,9 +285,13 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			}
 			// Worktree isolation on the task's exact branch; the host creates the
 			// worktree on the first send and falls back to a generated name if taken.
+			// Task runs are unattended: Claude's `auto` mode approves routine tool
+			// calls itself and asks (on the phone) only for the risky ones.
+			const permissionMode = this._configurationService.getValue<string>(TASK_PERMISSION_MODE_SETTING) === 'default' ? 'default' : 'auto';
 			const backend = await this._provisionalSessions.applyConfigChange(draft, provider, folder, {
 				[SessionConfigKey.Isolation]: 'worktree',
 				[SessionConfigKey.WorktreeBranchName]: cmd.branch,
+				[ClaudeSessionConfigKey.PermissionMode]: permissionMode,
 			});
 			if (!backend) {
 				throw new Error('the repository folder is not trusted, or the agent host is unavailable');
