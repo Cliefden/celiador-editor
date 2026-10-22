@@ -62,6 +62,7 @@ import { createPricingMetaFromBilling, normalizeCAPIBilling } from '../../common
 import { tryParseClaudeModelId } from './claudeModelId.js';
 import { resolvePromptToContentBlocks } from './claudePromptResolver.js';
 import { IClaudeProxyHandle, IClaudeProxyService, type ClaudeTransport } from './claudeProxyService.js';
+import { ICeliadorDaemonProxyHandle, ICeliadorDaemonProxyService } from './celiadorDaemonProxyService.js';
 import { readClaudePermissionMode } from './claudeSessionPermissionMode.js';
 import { ClaudeSessionMetadataStore, IClaudeSessionOverlay } from './claudeSessionMetadataStore.js';
 import { ClaudeTerminalOutputs } from './claudeTerminalOutput.js';
@@ -405,6 +406,13 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	 * publishes the daemon model catalog. Cleared on sign-out (empty token).
 	 */
 	private _daemonToken: string | undefined;
+	/**
+	 * Celiador: the loopback proxy every daemon session's SDK subprocess talks
+	 * to. It presents {@link _daemonToken} to the daemon per request, so a token
+	 * refresh reaches a running turn without rebuilding the subprocess. Acquired
+	 * with the first token, re-pointed on refresh, released on sign-out.
+	 */
+	private _daemonProxyHandle: ICeliadorDaemonProxyHandle | undefined;
 
 	/**
 	 * Memoized teardown promise. Set on the first call to {@link shutdown},
@@ -652,6 +660,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		@ILogService private readonly _logService: ILogService,
 		@ICopilotApiService private readonly _copilotApiService: ICopilotApiService,
 		@IClaudeProxyService private readonly _claudeProxyService: IClaudeProxyService,
+		@ICeliadorDaemonProxyService private readonly _celiadorDaemonProxyService: ICeliadorDaemonProxyService,
 		@IClaudeAgentSdkService private readonly _sdkService: IClaudeAgentSdkService,
 		@IAgentSdkDownloader private readonly _agentSdkDownloader: IAgentSdkDownloader,
 		@IAgentHostSessionTitleSignal private readonly _sessionTitleSignal: IAgentHostSessionTitleSignal,
@@ -820,7 +829,10 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		// model-provider routing entirely. The daemon holds the key, forces the model
 		// and charges quota, so no local proxy handle or native credential is needed.
 		if (this._daemonToken) {
-			return { kind: 'daemon', baseUrl: this._celiadorDaemonGatewayUrl(), authToken: this._daemonToken };
+			if (!this._daemonProxyHandle) {
+				throw new Error('The Celiador daemon proxy is not running; sign in again to restart it.');
+			}
+			return { kind: 'daemon', handle: this._daemonProxyHandle };
 		}
 		const transport = resolveClaudeSessionTransport({
 			model,
@@ -847,13 +859,31 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		if (resource === this._celiadorDaemonResource().resource) {
 			const next = token || undefined;
 			if (this._daemonToken !== next) {
-				const refreshed = this._daemonToken !== undefined && next !== undefined;
 				this._daemonToken = next;
-				if (refreshed) {
-					// Live sessions hold the old (soon expired) token in their SDK
-					// subprocess; rebuild them onto the new one at their next send.
-					for (const session of this._allLiveSessions()) {
-						session.requestDaemonTokenRefresh();
+				if (!next) {
+					// Sign-out: live daemon sessions lose their endpoint with the handle
+					// (the subprocess-ownership invariant is theirs to honour on their
+					// next send, which fails over to re-authentication).
+					const stale = this._daemonProxyHandle;
+					this._daemonProxyHandle = undefined;
+					stale?.dispose();
+				} else if (this._daemonProxyHandle) {
+					// A refresh: the proxy presents the new token on its next forwarded
+					// request, so running turns — even ones parked on an approval across
+					// the hourly expiry — carry on without a subprocess rebuild.
+					this._daemonProxyHandle.setToken(next);
+				} else {
+					try {
+						this._daemonProxyHandle = await this._celiadorDaemonProxyService.start({ gatewayUrl: this._celiadorDaemonGatewayUrl(), token: next });
+					} catch (err) {
+						this._logService.error('[Claude] Celiador daemon proxy failed to start; daemon sessions unavailable until the next sign-in', err);
+					}
+					if (this._daemonToken !== next || this._store.isDisposed) {
+						// Superseded while the proxy was binding.
+						const orphan = this._daemonProxyHandle;
+						this._daemonProxyHandle = undefined;
+						orphan?.dispose();
+						return true;
 					}
 				}
 				void this._startModelRefresh();
@@ -2841,6 +2871,10 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		this._proxyHandle?.dispose();
 		this._proxyHandle = undefined;
 		this._githubToken = undefined;
+		// Celiador: release the daemon proxy lease after the sessions, like the Copilot one.
+		this._daemonProxyHandle?.dispose();
+		this._daemonProxyHandle = undefined;
+		this._daemonToken = undefined;
 		this._models.set([], undefined);
 	}
 }

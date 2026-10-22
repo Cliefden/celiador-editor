@@ -36,6 +36,7 @@ import { AgentSdkDownloader, IAgentSdkDownloader } from './agentSdkDownloader.js
 import { IByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
 import { ClaudeAgentSdkService, IClaudeAgentSdkService } from './claude/claudeAgentSdkService.js';
 import { ClaudeProxyService, IClaudeProxyService } from './claude/claudeProxyService.js';
+import { CeliadorDaemonProxyService, ICeliadorDaemonProxyService } from './claude/celiadorDaemonProxyService.js';
 import { ByokLmProxyService, IByokLmProxyService, NullByokLmProxyService } from './copilot/byokLmProxyService.js';
 // Celiador: import the light module, not localModelSetupService.js — that one loads @github/copilot-sdk (not shipped).
 import { ILocalModelSetupService, NullLocalModelSetupService } from './copilot/localModelBridge/localModelSetup.js';
@@ -160,6 +161,7 @@ export function registerAgentHostHostServices(services: ServiceCollection, input
 	services.set(IAgentSdkDownloader, new SyncDescriptor(AgentSdkDownloader));
 	services.set(IClaudeAgentSdkService, new SyncDescriptor(ClaudeAgentSdkService));
 	services.set(IClaudeProxyService, new SyncDescriptor(ClaudeProxyService));
+	services.set(ICeliadorDaemonProxyService, new SyncDescriptor(CeliadorDaemonProxyService)); // Celiador
 	services.set(ICodexProxyService, new SyncDescriptor(CodexProxyService, [undefined]));
 	services.set(IAgentHostOTelService, new SyncDescriptor(AgentHostOTelService, [{ fetchFn: inputs.fetchFn }]));
 	services.set(IAgentHostUtilityModelService, new SyncDescriptor(AgentHostUtilityModelService, [inputs.byok.kind === 'renderer']));

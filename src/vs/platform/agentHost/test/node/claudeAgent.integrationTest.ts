@@ -74,6 +74,7 @@ import { IClaudeAgentSdkService } from '../../node/claude/claudeAgentSdkService.
 import { IAgentSdkDownloader } from '../../node/agentSdkDownloader.js';
 import { IAgentPluginManager } from '../../common/agentPluginManager.js';
 import { ClaudeProxyService, IClaudeProxyService } from '../../node/claude/claudeProxyService.js';
+import { CeliadorDaemonProxyService, ICeliadorDaemonProxyService } from '../../node/claude/celiadorDaemonProxyService.js';
 import { ICopilotApiService, type ICopilotApiServiceRequestOptions } from '../../node/shared/copilotApiService.js';
 import { createNoopGitService, createSessionDataService } from '../common/sessionTestHelpers.js';
 import { RecordingAgentSdkDownloader } from './testAgentSdkDownloader.js';
@@ -728,6 +729,7 @@ suite('ClaudeAgent integration (proxy-backed)', function () {
 		capi.streamEvents = makeCannedStream('claude-opus-4.6');
 
 		const realProxy = disposables.add(new ClaudeProxyService(new NullLogService(), capi));
+		const realDaemonProxy = disposables.add(new CeliadorDaemonProxyService(new NullLogService()));
 		const sdk = new ProxyRoundTripSdkService();
 		const logService = new NullLogService();
 		const stateManager = disposables.add(new AgentHostStateManager(logService));
@@ -738,6 +740,7 @@ suite('ClaudeAgent integration (proxy-backed)', function () {
 			[IAgentHostStartupPerformance, NullAgentHostStartupPerformance],
 			[ICopilotApiService, capi],
 			[IClaudeProxyService, realProxy],
+			[ICeliadorDaemonProxyService, realDaemonProxy],
 			[ISessionDataService, createSessionDataService()],
 			[IClaudeAgentSdkService, sdk],
 			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
@@ -871,6 +874,7 @@ suite('ClaudeAgent integration (proxy-backed)', function () {
 		const capi = new StubCopilotApiService();
 		capi.streamEvents = makeCannedStream('claude-opus-4.6');
 		const realProxy = disposables.add(new ClaudeProxyService(new NullLogService(), capi));
+		const realDaemonProxy = disposables.add(new CeliadorDaemonProxyService(new NullLogService()));
 		const sdk = new ProxyRoundTripSdkService();
 		const logService = new NullLogService();
 		const stateManager = disposables.add(new AgentHostStateManager(logService));
@@ -881,6 +885,7 @@ suite('ClaudeAgent integration (proxy-backed)', function () {
 			[IAgentHostStartupPerformance, NullAgentHostStartupPerformance],
 			[ICopilotApiService, capi],
 			[IClaudeProxyService, realProxy],
+			[ICeliadorDaemonProxyService, realDaemonProxy],
 			[ISessionDataService, createSessionDataService()],
 			[IClaudeAgentSdkService, sdk],
 			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],
@@ -956,6 +961,7 @@ suite('ClaudeAgent integration (proxy-backed)', function () {
 		const capi = new StubCopilotApiService();
 		capi.streamEvents = makeCannedStream('claude-opus-4.6');
 		const realProxy = disposables.add(new ClaudeProxyService(new NullLogService(), capi));
+		const realDaemonProxy = disposables.add(new CeliadorDaemonProxyService(new NullLogService()));
 		const sdk = new ProxyRoundTripSdkService();
 		const logService = new NullLogService();
 		const stateManager = disposables.add(new AgentHostStateManager(logService));
@@ -966,6 +972,7 @@ suite('ClaudeAgent integration (proxy-backed)', function () {
 			[IAgentHostStartupPerformance, NullAgentHostStartupPerformance],
 			[ICopilotApiService, capi],
 			[IClaudeProxyService, realProxy],
+			[ICeliadorDaemonProxyService, realDaemonProxy],
 			[ISessionDataService, createSessionDataService()],
 			[IClaudeAgentSdkService, sdk],
 			[IAgentSdkDownloader, new RecordingAgentSdkDownloader()],

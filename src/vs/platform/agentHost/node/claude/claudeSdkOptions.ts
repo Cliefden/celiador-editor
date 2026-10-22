@@ -135,22 +135,18 @@ export async function buildOptions(
 		...telemetryEnv,
 		// Proxied (Copilot-routed) mode points the SDK at the local proxy on a
 		// per-session bearer. Daemon (Celiador-routed) mode points it straight at
-		// the daemon's Anthropic gateway on the user's Supabase token. Native
+		// the local Celiador daemon proxy on the same kind of per-session bearer
+		// (the proxy attaches the user's current daemon token per request). Native
 		// (BYO-Anthropic) mode omits both so the SDK uses its own credential
 		// resolution from the subprocess env (`ANTHROPIC_API_KEY`, or
 		// `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` — forwarded by
 		// `buildSubprocessEnv`).
-		...(transport.kind === 'proxy'
+		...(transport.kind === 'proxy' || transport.kind === 'daemon'
 			? {
 				ANTHROPIC_BASE_URL: transport.handle.baseUrl,
 				ANTHROPIC_AUTH_TOKEN: `${transport.handle.nonce}.${input.sessionId}`,
 			}
-			: transport.kind === 'daemon'
-				? {
-					ANTHROPIC_BASE_URL: transport.baseUrl,
-					ANTHROPIC_AUTH_TOKEN: transport.authToken,
-				}
-				: {}),
+			: {}),
 		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
 		USE_BUILTIN_RIPGREP: '0',
 		// Attribute the CLI's tool subprocesses (`gh`, …) to VS Code.
