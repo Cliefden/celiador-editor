@@ -330,6 +330,8 @@ interface FinishTaskArgs {
   root: string;
   title: string;
   issue?: { number: number; url: string };
+  /** Add the opt-in "made with Celiador" line to the pull request body. */
+  attribution?: boolean;
 }
 
 /** The worktree checked out on `branch` under the repository at `repoRoot`, if any. */
@@ -368,7 +370,12 @@ async function finishTask(args: FinishTaskArgs): Promise<GitReviewResult> {
   const target = parseGitHubRemote(remote?.pushUrl ?? remote?.fetchUrl);
   if (!remote || !target) {return { ok: false, error: `the repository's remote is not on GitHub` };}
   await repo.push(remote.name, branch, true);
-  const body = args.issue ? `Closes #${args.issue.number}` : '';
+  const lines = [args.issue ? `Closes #${args.issue.number}` : ''];
+  if (args.attribution) {
+    // Opt-in (celiador.agentTasks.attribution): the growth loop's one line.
+    lines.push('', '---', `Made with [Celiador](https://celiador.ai): an agent ran this${args.issue ? ` from issue #${args.issue.number}` : ''} and a person reviewed it.`);
+  }
+  const body = lines.join('\n');
   const pr = await openPullRequest(target, branch, { kind: 'git.pr', title: args.title, body });
   if (!pr.ok && /no commits between/i.test(pr.error ?? '')) {
     return { ok: false, error: 'the agent made no changes' };
@@ -389,6 +396,20 @@ export function registerTaskCommands(): vscode.Disposable {
     vscode.commands.registerCommand('celiador.finishTask', async (args: FinishTaskArgs): Promise<GitReviewResult> => {
       try {
         return await finishTask(args);
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }),
+    // The "picked up" comment on a queued issue, with the editor's GitHub
+    // sign-in or the gh CLI's. Best-effort: without either it reports why.
+    vscode.commands.registerCommand('celiador.commentOnIssue', async (args: { remoteUrl: string; number: number; body: string }): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        const target = parseGitHubRemote(args.remoteUrl);
+        if (!target) {return { ok: false, error: 'the repository is not on GitHub' };}
+        const token = await githubToken();
+        if (!token) {return { ok: false, error: 'no GitHub sign-in' };}
+        const res = await githubApi(token)('POST', `/repos/${target.owner}/${target.repo}/issues/${args.number}/comments`, { body: args.body });
+        return res.status === 201 ? { ok: true } : { ok: false, error: typeof res.json?.message === 'string' ? res.json.message : `GitHub returned ${res.status}` };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }

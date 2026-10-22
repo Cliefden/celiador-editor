@@ -38,6 +38,10 @@ import { normalizeToHttps, parseRemoteUrl } from './celiadorWorkspacePresence.js
  * real questions and finished pull requests rather than a tap per command.
  */
 const TASK_PERMISSION_MODE_SETTING = 'celiador.agentTasks.permissionMode';
+/** Celiador: comment on the GitHub issue when its run starts (the plan's "picked up" comment). */
+const TASK_ISSUE_COMMENT_SETTING = 'celiador.agentTasks.issueComment';
+/** Celiador: opt-in "made with Celiador" line on agent pull requests. */
+const TASK_ATTRIBUTION_SETTING = 'celiador.agentTasks.attribution';
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'celiador',
@@ -52,6 +56,16 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			],
 			default: 'auto',
 			description: localize('celiador.agentTasks.permissionMode', "How much an agent task (a queued GitHub issue run in its own worktree) may do without asking."),
+		},
+		[TASK_ISSUE_COMMENT_SETTING]: {
+			type: 'boolean',
+			default: true,
+			description: localize('celiador.agentTasks.issueComment', "When a queued GitHub issue starts running, post a short comment on it (with your GitHub sign-in) saying an agent picked it up and will open a pull request."),
+		},
+		[TASK_ATTRIBUTION_SETTING]: {
+			type: 'boolean',
+			default: false,
+			description: localize('celiador.agentTasks.attribution', "Add a line to pull requests opened by agent tasks saying they were made with Celiador."),
 		},
 	},
 });
@@ -305,6 +319,17 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			}
 			this._logService.info(`[celiador-control] task ${cmd.taskId} running on ${cmd.branch}`);
 			await this._reportTask(cmd.taskId, { state: 'running' });
+			// The issue's "picked up" comment: best-effort, through the extension's
+			// GitHub sign-in (or gh), so watchers of the issue see it is in motion.
+			if (cmd.issue && this._configurationService.getValue<boolean>(TASK_ISSUE_COMMENT_SETTING) !== false) {
+				const body = `Celiador picked this up: an agent is working on it in a worktree on branch \`${cmd.branch}\` and will open a pull request linked here. Approvals and questions go to the Celiador queue.`;
+				void this._commandService.executeCommand<{ ok: boolean; error?: string }>('celiador.commentOnIssue', { remoteUrl: cmd.remoteUrl, number: cmd.issue.number, body })
+					.then(result => {
+						if (!result?.ok) {
+							this._logService.info(`[celiador-control] task ${cmd.taskId}: no issue comment (${result?.error ?? 'unavailable'})`);
+						}
+					}, e => this._logService.trace(`[celiador-control] issue comment failed: ${e}`));
+			}
 		} catch (e) {
 			this._handled.delete(cmd.taskId);
 			const message = e instanceof Error ? e.message : String(e);
@@ -350,7 +375,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			if (!worktree) {
 				throw new Error(`couldn't find the run's worktree for branch ${run.branch} (was the name taken?)`);
 			}
-			const result = await this._commandService.executeCommand<{ ok: boolean; url?: string; error?: string }>('celiador.finishTask', { root: worktree.fsPath, title: run.title, issue: run.issue });
+			const result = await this._commandService.executeCommand<{ ok: boolean; url?: string; error?: string }>('celiador.finishTask', { root: worktree.fsPath, title: run.title, issue: run.issue, attribution: this._configurationService.getValue<boolean>(TASK_ATTRIBUTION_SETTING) === true });
 			if (!result?.ok || !result.url) {
 				throw new Error(result?.error ?? 'opening the pull request failed');
 			}
