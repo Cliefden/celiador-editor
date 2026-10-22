@@ -1,0 +1,22 @@
+Celiador editor
+Copyright 2025-2026 Stefan Crafoord-Wiklund / Cliefden
+
+Celiador is a fork of Visual Studio Code - Open Source ("Code - OSS"),
+Copyright (c) Microsoft Corporation, licensed under the MIT License
+(see LICENSE.txt). Third-party components are listed in ThirdPartyNotices.txt.
+Celiador is an independent fork and is not affiliated with or endorsed by
+Microsoft.
+
+Celiador's own changes and additions to this repository — including the
+celiador-ai extension, the agent task runner, the phone relay, the daemon
+transport, branding and build scripts — are licensed under the Apache License,
+Version 2.0 (see LICENSE-CELIADOR.txt). The MIT-licensed upstream code they
+modify keeps its licence and copyright notice; the combined work may be used
+under both licences' terms together.
+
+Trademarks
+----------
+"Celiador", the Celiador logo and the celiador.ai hosted service are not covered
+by either licence. You may build and redistribute this editor, but not under the
+Celiador name or logo, and not with Celiador's signing identity, update feed or
+telemetry identifiers, without written permission.

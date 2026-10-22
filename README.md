@@ -88,4 +88,4 @@ Keep core edits minimal and localized so these merges stay low-conflict.
 
 ## License
 
-MIT — see [`LICENSE.txt`](LICENSE.txt). Celiador is an independent fork and is not affiliated with or endorsed by Microsoft.
+The upstream Code - OSS code is MIT (Microsoft) — see [`LICENSE.txt`](LICENSE.txt) and [`ThirdPartyNotices.txt`](ThirdPartyNotices.txt). Celiador's own changes and additions (the `celiador-ai` extension, the agent task runner, the phone relay, the daemon transport, branding, build scripts) are Apache-2.0 — see [`LICENSE-CELIADOR.txt`](LICENSE-CELIADOR.txt) and [`NOTICE`](NOTICE). The Celiador name and logo, the signing identity, update feed and telemetry identifiers are not licensed; build and redistribute the editor, but under your own name. Celiador is an independent fork and is not affiliated with or endorsed by Microsoft.
