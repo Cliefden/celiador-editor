@@ -173,13 +173,22 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				}
 				client = this._createClient(key, session.resource);
 				const title = session.label || 'Agent session';
-				void client.start(title, getCeliadorTaskRun(key)?.taskId).then(() => {
+				void client.start(title, getCeliadorTaskRun(key)?.taskId, this._mirrorKey(session.resource)).then(() => {
 					// Publish the current status once the relay session exists.
 					const current = this._sessionsService.model.getSession(session.resource);
 					if (current && this._clients.get(key) === client) {
 						this._publishStatus(key, current.status, client!);
 					}
 				});
+				continue;
+			}
+
+			// Another window mirrors this session: stay quiet, but re-claim on a new
+			// turn in case that window has since closed (throttled in the client).
+			if (client.mirroredElsewhere) {
+				if (active) {
+					void client.start(session.label || 'Agent session', getCeliadorTaskRun(key)?.taskId, this._mirrorKey(session.resource));
+				}
 				continue;
 			}
 
@@ -318,6 +327,15 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		}
 		const value = resource.toString();
 		return URI.parse(value.startsWith(LOCAL_AGENT_HOST_SCHEME_PREFIX) ? value.slice(LOCAL_AGENT_HOST_SCHEME_PREFIX.length) : value);
+	}
+
+	/**
+	 * The agent session's identity across windows: every editor window and the
+	 * Agents window run this bridge over the same machine-wide agent host, so the
+	 * daemon keys on the backend session to keep one mirror (and one phone entry).
+	 */
+	private _mirrorKey(resource: URI): string {
+		return this._backendSession(resource).toString();
 	}
 
 	/**

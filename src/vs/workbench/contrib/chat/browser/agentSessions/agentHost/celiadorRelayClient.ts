@@ -75,6 +75,8 @@ const MAX_ATTEMPTS = 3;
 /** Events buffered before the relay session exists (start() is async — a fast
  * run streams deltas before the create round-trip finishes; don't drop them). */
 const MAX_PRESTART_BUFFER = 500;
+/** How long a quiet client waits before re-claiming a mirror another window held (that window may be gone). */
+const MIRROR_RETRY_MS = 60_000;
 
 export interface ICeliadorRelayClientOptions {
 	/** Resolve the daemon base URL (no trailing slash), e.g. `https://celiador.ai`. */
@@ -118,6 +120,13 @@ export class CeliadorRelayClient extends Disposable {
 	private _flushChain: Promise<void> = Promise.resolve();
 	private _commandAbort: AbortController | undefined;
 	private _disposed = false;
+	/**
+	 * Another window (an editor window or the Agents window) already mirrors this
+	 * agent session to the daemon: this client stays quiet so the phone gets one
+	 * copy. Cleared when a later claim succeeds (that window went away).
+	 */
+	private _mirroredElsewhere = false;
+	private _lastClaimAt = 0;
 
 	constructor(private readonly _options: ICeliadorRelayClientOptions) {
 		super();
@@ -132,9 +141,21 @@ export class CeliadorRelayClient extends Disposable {
 		return this._sessionId;
 	}
 
-	/** Lazily create the session (titled by the first prompt) and open its command channel. */
-	async start(title: string, taskId?: string): Promise<void> {
+	/** True while another window holds this agent session's mirror (see {@link _mirroredElsewhere}). */
+	get mirroredElsewhere(): boolean {
+		return this._mirroredElsewhere;
+	}
+
+	/**
+	 * Lazily create the session (titled by the first prompt) and open its command
+	 * channel. `mirrorKey` identifies the agent session across windows; the daemon
+	 * answers 409 when another window already mirrors it.
+	 */
+	async start(title: string, taskId?: string, mirrorKey?: string): Promise<void> {
 		if (this._sessionId || this._disposed) {
+			return;
+		}
+		if (this._mirroredElsewhere && Date.now() - this._lastClaimAt < MIRROR_RETRY_MS) {
 			return;
 		}
 		const token = await this._options.getToken();
@@ -142,14 +163,22 @@ export class CeliadorRelayClient extends Disposable {
 			return; // signed out → local-only, no relay
 		}
 		try {
+			this._lastClaimAt = Date.now();
 			const res = await fetch(`${this._options.getUrl()}/api/sessions`, {
 				method: 'POST',
 				headers: this._headers(token),
-				body: JSON.stringify({ title, origin: 'editor', runner: 'editor', ...(taskId ? { taskId } : {}) }), // Celiador: taskId links an agent task's run
+				body: JSON.stringify({ title, origin: 'editor', runner: 'editor', ...(taskId ? { taskId } : {}), ...(mirrorKey ? { mirrorKey } : {}) }), // Celiador: taskId links an agent task's run
 			});
+			if (res.status === 409) {
+				this._mirroredElsewhere = true;
+				this._buffer = [];
+				this._options.log?.('another window already mirrors this session; staying quiet');
+				return;
+			}
 			if (!res.ok) {
 				return;
 			}
+			this._mirroredElsewhere = false;
 			const data = await res.json() as { session?: { id?: string } };
 			this._sessionId = data.session?.id;
 			if (this._sessionId) {
@@ -165,7 +194,7 @@ export class CeliadorRelayClient extends Disposable {
 	/** Queue an event for the phone; urgent kinds flush immediately. Events
 	 * published before the session exists are buffered and delivered by start(). */
 	publish(event: IRelayEvent): void {
-		if (this._disposed) {
+		if (this._disposed || this._mirroredElsewhere) {
 			return;
 		}
 		if (event.kind === 'state') {
