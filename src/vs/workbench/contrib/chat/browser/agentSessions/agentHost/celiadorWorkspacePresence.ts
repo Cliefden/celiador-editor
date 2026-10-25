@@ -69,13 +69,8 @@ export class CeliadorWorkspacePresence extends Disposable implements IWorkbenchC
 		if (!token) {
 			return; // signed out → nothing to publish (daemon TTL clears any stale set)
 		}
-		const workspaces: { name: string; remoteUrl: string; branch?: string }[] = [];
-		for (const folder of this._workspaceService.getWorkspace().folders) {
-			const info = await this._gitInfo(folder.uri);
-			if (info) {
-				workspaces.push({ name: folder.name, remoteUrl: info.remoteUrl, branch: info.branch });
-			}
-		}
+		const repos = await findOpenRepos(this._workspaceService, this._fileService);
+		const workspaces = repos.map(({ name, remoteUrl, branch }) => ({ name, remoteUrl, branch }));
 		try {
 			// Heartbeat even when empty so the daemon ages out folders that were closed.
 			await fetch(`${this._daemonUrl()}/api/presence/workspaces`, {
@@ -87,34 +82,115 @@ export class CeliadorWorkspacePresence extends Disposable implements IWorkbenchC
 			this._logService.trace(`[celiador-presence] publish failed: ${e}`);
 		}
 	}
+}
 
-	/** Read a folder's origin remote (normalised to https) and current branch, if any. */
-	private async _gitInfo(root: URI): Promise<{ remoteUrl: string; branch?: string } | undefined> {
+/** A git checkout reachable from the window's folders, with an https origin. */
+export interface ICeliadorOpenRepo {
+	readonly name: string;
+	readonly remoteUrl: string;
+	readonly branch?: string;
+	readonly folder: URI;
+	/** Found inside a workspace folder rather than being one. */
+	readonly nested: boolean;
+}
+
+/** The daemon rejects a presence heartbeat with more entries than this. */
+const MAX_REPOS = 50;
+/** Subfolders never worth looking into for a nested checkout. */
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', 'build', 'vendor', 'Pods']);
+
+/**
+ * The checkouts reachable from the window's folders: each folder that is itself
+ * a checkout, and otherwise the checkouts directly inside it, so a window on a
+ * folder of repos offers every repo in it rather than none. Worktrees (whose
+ * `.git` is a file) count too.
+ */
+export async function findOpenRepos(workspaceService: IWorkspaceContextService, fileService: IFileService): Promise<ICeliadorOpenRepo[]> {
+	const repos: ICeliadorOpenRepo[] = [];
+	const seen = new Set<string>();
+	const add = async (name: string, folder: URI, nested: boolean): Promise<boolean> => {
+		const info = await gitInfo(fileService, folder);
+		if (info && !seen.has(folder.toString())) {
+			seen.add(folder.toString());
+			repos.push({ name, remoteUrl: info.remoteUrl, branch: info.branch, folder, nested });
+		}
+		return !!info;
+	};
+	for (const folder of workspaceService.getWorkspace().folders) {
+		if (await add(folder.name, folder.uri, false) || await fileService.exists(joinPath(folder.uri, '.git'))) {
+			continue;
+		}
+		let children;
 		try {
-			const configUri = joinPath(root, '.git', 'config');
-			if (!(await this._fileService.exists(configUri))) {
-				return undefined;
-			}
-			const config = (await this._fileService.readFile(configUri)).value.toString();
-			const remote = parseRemoteUrl(config);
-			if (!remote) {
-				return undefined;
-			}
-			const remoteUrl = normalizeToHttps(remote);
-			if (!remoteUrl) {
-				return undefined; // only https clone URLs are usable by the cloud run
-			}
-			let branch: string | undefined;
-			try {
-				const head = (await this._fileService.readFile(joinPath(root, '.git', 'HEAD'))).value.toString().trim();
-				branch = /^ref:\s*refs\/heads\/(.+)$/.exec(head)?.[1];
-			} catch {
-				/* detached HEAD or unreadable — branch stays undefined */
-			}
-			return { remoteUrl, branch };
+			children = (await fileService.resolve(folder.uri)).children ?? [];
 		} catch {
+			continue;
+		}
+		for (const child of children) {
+			if (child.isDirectory && !child.name.startsWith('.') && !SKIP_DIRS.has(child.name)) {
+				await add(child.name, child.resource, true);
+			}
+		}
+	}
+	return repos.slice(0, MAX_REPOS);
+}
+
+/**
+ * The git directory of the checkout at `root` and the directory holding its
+ * config: both `.git` for a normal checkout; for a worktree (`.git` is a file
+ * `gitdir: …/.git/worktrees/<name>`) the worktree's gitdir and the main repo's
+ * `.git` (via `commondir`).
+ */
+async function gitDirs(fileService: IFileService, root: URI): Promise<{ gitDir: URI; commonDir: URI } | undefined> {
+	const dotGit = joinPath(root, '.git');
+	let stat;
+	try {
+		stat = await fileService.stat(dotGit);
+	} catch {
+		return undefined;
+	}
+	if (stat.isDirectory) {
+		return { gitDir: dotGit, commonDir: dotGit };
+	}
+	const gitdir = /^gitdir:\s*(.+)$/m.exec((await fileService.readFile(dotGit)).value.toString())?.[1]?.trim();
+	if (!gitdir) {
+		return undefined;
+	}
+	const gitDir = /^(\/|[a-zA-Z]:[\\/])/.test(gitdir) ? URI.file(gitdir) : joinPath(root, gitdir);
+	try {
+		const common = (await fileService.readFile(joinPath(gitDir, 'commondir'))).value.toString().trim();
+		return { gitDir, commonDir: /^(\/|[a-zA-Z]:[\\/])/.test(common) ? URI.file(common) : joinPath(gitDir, common) };
+	} catch {
+		return { gitDir, commonDir: gitDir }; // not a worktree gitdir (e.g. a submodule)
+	}
+}
+
+/** A checkout's origin remote (normalised to https) and current branch, if any. */
+async function gitInfo(fileService: IFileService, root: URI): Promise<{ remoteUrl: string; branch?: string } | undefined> {
+	try {
+		const dirs = await gitDirs(fileService, root);
+		if (!dirs) {
 			return undefined;
 		}
+		const config = (await fileService.readFile(joinPath(dirs.commonDir, 'config'))).value.toString();
+		const remote = parseRemoteUrl(config);
+		if (!remote) {
+			return undefined;
+		}
+		const remoteUrl = normalizeToHttps(remote);
+		if (!remoteUrl) {
+			return undefined; // only https clone URLs are usable by the cloud run
+		}
+		let branch: string | undefined;
+		try {
+			const head = (await fileService.readFile(joinPath(dirs.gitDir, 'HEAD'))).value.toString().trim();
+			branch = /^ref:\s*refs\/heads\/(.+)$/.exec(head)?.[1];
+		} catch {
+			/* detached HEAD or unreadable — branch stays undefined */
+		}
+		return { remoteUrl, branch };
+	} catch {
+		return undefined;
 	}
 }
 

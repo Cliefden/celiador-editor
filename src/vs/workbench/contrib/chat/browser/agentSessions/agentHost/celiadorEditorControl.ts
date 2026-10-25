@@ -5,7 +5,6 @@
 
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { Disposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
-import { joinPath } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
@@ -28,7 +27,7 @@ import { IAgentSessionsService } from '../agentSessionsService.js';
 import { getLocalAgentHostSessionProvider } from './agentHostSessionUri.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
 import { celiadorTaskRunEntries, deleteCeliadorTaskRun, setCeliadorTaskRun, type ICeliadorTaskRun } from './celiadorTaskRuns.js';
-import { normalizeToHttps, parseRemoteUrl } from './celiadorWorkspacePresence.js';
+import { findOpenRepos, type ICeliadorOpenRepo } from './celiadorWorkspacePresence.js';
 
 /**
  * Celiador: how much an agent task run may do without asking. Tasks run while
@@ -220,8 +219,8 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			return;
 		}
 		// Only this window should act, and only if it actually has the repo open.
-		const open = await this._openRemotes();
-		if (!open.has(cmd.remoteUrl)) {
+		const repo = await this._repoForRemote(cmd.remoteUrl);
+		if (!repo) {
 			return;
 		}
 		this._handled.add(cmd.requestId);
@@ -229,7 +228,11 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			// With a prompt, seed the first turn; without one, open an idle session so
 			// the phone lands in a live chat and types the first message itself.
 			const sendOptions = cmd.prompt && cmd.prompt.trim() ? { prompt: cmd.prompt } : undefined;
-			await this._commandService.executeCommand(CeliadorEditorControl.OPEN_SESSION_COMMAND, 'sidebar', sendOptions);
+			if (repo.nested) {
+				await this._openSessionIn(repo.folder, sendOptions);
+			} else {
+				await this._commandService.executeCommand(CeliadorEditorControl.OPEN_SESSION_COMMAND, 'sidebar', sendOptions);
+			}
 			this._logService.trace(`[celiador-control] started a run for ${cmd.name ?? cmd.remoteUrl}`);
 			this._telemetryService.publicLog2<PhoneRunEvent, PhoneRunClassification>('celiador/phoneRun', { seeded: !!sendOptions });
 		} catch (e) {
@@ -238,30 +241,28 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		}
 	}
 
-	/** The https-normalised origin remotes of the folders open in this window. */
-	private async _openRemotes(): Promise<Set<string>> {
-		const remotes = new Set<string>();
-		for (const folder of this._workspaceService.getWorkspace().folders) {
-			const remote = await this._folderRemote(folder.uri);
-			if (remote) {
-				remotes.add(remote);
-			}
-		}
-		return remotes;
+	/** The checkout reachable from this window whose origin remote is `remoteUrl`. */
+	private async _repoForRemote(remoteUrl: string): Promise<ICeliadorOpenRepo | undefined> {
+		const repos = await findOpenRepos(this._workspaceService, this._fileService);
+		return repos.find(r => r.remoteUrl.toLowerCase() === remoteUrl.toLowerCase());
 	}
 
-	private async _folderRemote(root: URI): Promise<string | undefined> {
-		try {
-			const configUri = joinPath(root, '.git', 'config');
-			if (!(await this._fileService.exists(configUri))) {
-				return undefined;
-			}
-			const config = (await this._fileService.readFile(configUri)).value.toString();
-			const remote = parseRemoteUrl(config);
-			return remote ? normalizeToHttps(remote) : undefined;
-		} catch {
-			return undefined;
+	/**
+	 * Open a local agent-host session whose working directory is `folder` — a repo
+	 * nested inside a workspace folder, which the in-place command (it uses the
+	 * window's default folder) can't target.
+	 */
+	private async _openSessionIn(folder: URI, sendOptions: { prompt: string } | undefined): Promise<void> {
+		const openOptions = { type: SessionType.AgentHostClaude, position: ChatSessionPosition.Sidebar, displayName: 'Chat' };
+		const draft = getResourceForNewChatSession(openOptions);
+		const provider = getLocalAgentHostSessionProvider(draft);
+		if (!provider) {
+			throw new Error('the local agent host is not available');
 		}
+		if (!await this._provisionalSessions.applyConfigChange(draft, provider, folder, {})) {
+			throw new Error('the repository folder is not trusted, or the agent host is unavailable');
+		}
+		await this._instantiationService.invokeFunction(accessor => openChatSession(accessor, { ...openOptions, sessionResource: draft }, sendOptions));
 	}
 
 	private _backoff(): Promise<void> {
@@ -286,7 +287,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		if (!cmd.taskId || !cmd.remoteUrl || !cmd.branch || !cmd.prompt || this._handled.has(cmd.taskId)) {
 			return;
 		}
-		const folder = await this._folderForRemote(cmd.remoteUrl);
+		const folder = (await this._repoForRemote(cmd.remoteUrl))?.folder;
 		if (!folder) {
 			return; // another window (or none) has this repo
 		}
@@ -409,14 +410,4 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		}
 	}
 
-	/** The window folder whose origin remote is `remoteUrl`. */
-	private async _folderForRemote(remoteUrl: string): Promise<URI | undefined> {
-		for (const folder of this._workspaceService.getWorkspace().folders) {
-			const remote = await this._folderRemote(folder.uri);
-			if (remote && remote.toLowerCase() === remoteUrl.toLowerCase()) {
-				return folder.uri;
-			}
-		}
-		return undefined;
-	}
 }
