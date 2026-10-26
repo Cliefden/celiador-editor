@@ -4,10 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
-import { Disposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, IDisposable, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
-import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { CommandsRegistry, ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../../../platform/configuration/common/configurationRegistry.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -17,16 +17,18 @@ import { SessionConfigKey } from '../../../../../../platform/agentHost/common/se
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
 import { IAuthenticationService } from '../../../../../services/authentication/common/authentication.js';
 import { ChatSessionStatus, SessionType } from '../../../common/chatSessionsService.js';
 import { ChatSessionPosition, getResourceForNewChatSession, openChatSession } from '../../chatSessions/chatSessions.contribution.js';
+import { openSessionByResource } from '../agentSessionsOpener.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
 import { getLocalAgentHostSessionProvider } from './agentHostSessionUri.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
-import { celiadorTaskRunEntries, deleteCeliadorTaskRun, setCeliadorTaskRun, type ICeliadorTaskRun } from './celiadorTaskRuns.js';
+import { celiadorPickedUpComment, celiadorTaskRunEntries, findCeliadorTaskRun, parseCeliadorTaskRuns, serializeCeliadorTaskRuns, setCeliadorTaskRun, type ICeliadorTaskRun } from './celiadorTaskRuns.js';
 import { findOpenRepos, type ICeliadorOpenRepo } from './celiadorWorkspacePresence.js';
 
 /**
@@ -41,6 +43,8 @@ const TASK_PERMISSION_MODE_SETTING = 'celiador.agentTasks.permissionMode';
 const TASK_ISSUE_COMMENT_SETTING = 'celiador.agentTasks.issueComment';
 /** Celiador: opt-in "made with Celiador" line on agent pull requests. */
 const TASK_ATTRIBUTION_SETTING = 'celiador.agentTasks.attribution';
+/** Celiador: this workspace's agent task run records (see {@link ICeliadorTaskRun}). */
+const TASK_RUNS_STORAGE_KEY = 'celiador.agentTasks.runs';
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'celiador',
@@ -92,6 +96,35 @@ type PhoneRunEvent = {
 	seeded: boolean;
 };
 
+/** The pull request numbers the celiador-ai extension reads off GitHub for a task's PR. */
+interface ITaskPullRequest {
+	readonly number: number;
+	readonly additions?: number;
+	readonly deletions?: number;
+	readonly changedFiles?: number;
+}
+
+/** What `POST /api/tasks/:id/status` accepts from the editor (agents UI contract §2). */
+interface ITaskStatusReport {
+	readonly state: 'running' | 'pr-open' | 'failed';
+	readonly prUrl?: string;
+	readonly error?: string;
+	readonly pr?: ITaskPullRequest;
+}
+
+/** What `celiador.taskRunInfo` returns to the celiador-ai extension's Agents view. */
+interface ICeliadorTaskRunInfo {
+	readonly taskId: string;
+	readonly title: string;
+	readonly branch: string;
+	readonly repoRoot: string;
+	readonly worktree?: string;
+	readonly sessionResource: string;
+	readonly finished: boolean;
+	readonly prUrl?: string;
+	readonly startedAt: number;
+}
+
 /**
  * Celiador: the editor end of "Run on your editor". The companion phone asks the
  * daemon to start a run on a repo it already has open (POST /api/presence/requests);
@@ -122,6 +155,8 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 	private readonly _abort = new AbortController();
 	/** Request ids already acted on, so a reconnect can't double-start a run. */
 	private readonly _handled = new Set<string>();
+	/** This computer's name as the celiador-ai extension reports it (asked once). */
+	private _machine: string | undefined;
 
 	constructor(
 		@ICommandService private readonly _commandService: ICommandService,
@@ -135,9 +170,14 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 		@IAgentHostUntitledProvisionalSessionService private readonly _provisionalSessions: IAgentHostUntitledProvisionalSessionService,
 		@IAgentSessionsService private readonly _sessionsService: IAgentSessionsService,
+		@IStorageService private readonly _storageService: IStorageService,
 	) {
 		super();
 		this._register(toDisposable(() => this._abort.abort()));
+		// Agent tasks: the runs this workspace started survive a reload, so a
+		// finished run's follow-ups, merge and diffs keep targeting its worktree.
+		this._restoreTaskRuns();
+		this._register(this._registerTaskCommands());
 		// Agent tasks: notice when a task's run finishes, then open its pull request.
 		this._register(this._sessionsService.model.onDidChangeSessions(() => this._checkTaskRuns()));
 		void this._loop();
@@ -277,6 +317,83 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 
 	// --- Agent tasks (the agent-first queue) -----------------------------------
 
+	/** Load the run records this workspace kept (see {@link _saveTaskRuns}). */
+	private _restoreTaskRuns(): void {
+		for (const [key, run] of parseCeliadorTaskRuns(this._storageService.get(TASK_RUNS_STORAGE_KEY, StorageScope.WORKSPACE))) {
+			setCeliadorTaskRun(URI.parse(key), run);
+			this._handled.add(run.taskId);
+		}
+	}
+
+	/** Persist the run records (capped) so a window reload keeps targeting each run's worktree. */
+	private _saveTaskRuns(): void {
+		this._storageService.store(TASK_RUNS_STORAGE_KEY, serializeCeliadorTaskRuns(celiadorTaskRunEntries()), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+	}
+
+	/**
+	 * Commands the celiador-ai extension's Agents view calls: where a task's run
+	 * lives (`celiador.taskRunInfo`), and focusing its chat (`celiador.openTaskSession`).
+	 */
+	private _registerTaskCommands(): IDisposable {
+		const info = CommandsRegistry.registerCommand('celiador.taskRunInfo', async (_accessor, taskId: unknown): Promise<ICeliadorTaskRunInfo | undefined> => {
+			if (typeof taskId !== 'string') {
+				return undefined;
+			}
+			const found = findCeliadorTaskRun(taskId);
+			if (!found) {
+				return undefined;
+			}
+			const { run, keys } = found;
+			const worktree = run.worktree ?? await this._resolveWorktree(run);
+			return {
+				taskId: run.taskId,
+				title: run.title,
+				branch: run.branch,
+				repoRoot: run.repoRoot.fsPath,
+				worktree: worktree?.fsPath,
+				sessionResource: this._liveSessionKey(keys) ?? keys[keys.length - 1],
+				finished: run.finished === true,
+				prUrl: run.prUrl,
+				startedAt: run.startedAt,
+			};
+		});
+		const open = CommandsRegistry.registerCommand('celiador.openTaskSession', async (accessor, taskId: unknown): Promise<boolean> => {
+			const found = typeof taskId === 'string' ? findCeliadorTaskRun(taskId) : undefined;
+			const key = found && this._liveSessionKey(found.keys);
+			if (!key) {
+				return false;
+			}
+			await openSessionByResource(accessor, URI.parse(key));
+			return true;
+		});
+		return toDisposable(() => {
+			info.dispose();
+			open.dispose();
+		});
+	}
+
+	/** The one of a run's recorded resources that the sessions model knows. */
+	private _liveSessionKey(keys: readonly string[]): string | undefined {
+		const sessions = this._sessionsService.model.sessions;
+		return keys.find(key => sessions.some(s => s.resource.toString() === key));
+	}
+
+	/** This computer's name and the repository's default branch, from the celiador-ai extension. */
+	private async _taskContext(repoRoot?: URI): Promise<{ machine?: string; defaultBranch?: string }> {
+		try {
+			const result = await this._commandService.executeCommand<{ machine?: string; defaultBranch?: string }>('celiador.taskContext', { repoRoot: repoRoot?.fsPath });
+			return result ?? {};
+		} catch {
+			return {};
+		}
+	}
+
+	private async _machineName(): Promise<string | undefined> {
+		// Not cached while unknown: the extension may not have activated yet.
+		this._machine ??= (await this._taskContext()).machine;
+		return this._machine;
+	}
+
 	/**
 	 * Run a queued agent task: a new local agent-host session in its own git
 	 * worktree on the task's branch, seeded with the task's prompt. The run is
@@ -284,7 +401,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 	 * {@link _checkTaskRuns} can open the pull request when it finishes.
 	 */
 	private async _startTask(cmd: ITaskCommand): Promise<void> {
-		if (!cmd.taskId || !cmd.remoteUrl || !cmd.branch || !cmd.prompt || this._handled.has(cmd.taskId)) {
+		if (!cmd.taskId || !cmd.remoteUrl || !cmd.branch || !cmd.prompt || this._handled.has(cmd.taskId) || findCeliadorTaskRun(cmd.taskId)) {
 			return;
 		}
 		const folder = (await this._repoForRemote(cmd.remoteUrl))?.folder;
@@ -313,19 +430,21 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			if (!backend) {
 				throw new Error('the repository folder is not trusted, or the agent host is unavailable');
 			}
-			const run: ICeliadorTaskRun = { taskId: cmd.taskId, title: cmd.title ?? cmd.branch, branch: cmd.branch, issue: cmd.issue, repoRoot: folder };
+			const run: ICeliadorTaskRun = { taskId: cmd.taskId, title: cmd.title ?? cmd.branch, branch: cmd.branch, issue: cmd.issue, repoRoot: folder, startedAt: Date.now() };
 			// Record against the draft first: the bridge may mirror the session before openChatSession returns.
 			setCeliadorTaskRun(draft, run);
 			const opened = await this._instantiationService.invokeFunction(accessor => openChatSession(accessor, { ...openOptions, sessionResource: draft }, { prompt: cmd.prompt! }));
 			if (opened && opened.toString() !== draft.toString()) {
 				setCeliadorTaskRun(opened, run);
 			}
+			this._saveTaskRuns();
 			this._logService.info(`[celiador-control] task ${cmd.taskId} running on ${cmd.branch}`);
 			await this._reportTask(cmd.taskId, { state: 'running' });
 			// The issue's "picked up" comment: best-effort, through the extension's
 			// GitHub sign-in (or gh), so watchers of the issue see it is in motion.
 			if (cmd.issue && !cmd.commented && this._configurationService.getValue<boolean>(TASK_ISSUE_COMMENT_SETTING) !== false) {
-				const body = `Celiador picked this up: an agent is working on it in a worktree on branch \`${cmd.branch}\` and will open a pull request linked here. Approvals and questions go to the Celiador queue.`;
+				const context = await this._taskContext(folder);
+				const body = celiadorPickedUpComment({ machine: context.machine, branch: cmd.branch, baseBranch: context.defaultBranch, taskId: cmd.taskId, openBaseUrl: this._daemonUrl() });
 				void this._commandService.executeCommand<{ ok: boolean; error?: string }>('celiador.commentOnIssue', { remoteUrl: cmd.remoteUrl, number: cmd.issue.number, body })
 					.then(result => {
 						if (!result?.ok) {
@@ -341,14 +460,25 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		}
 	}
 
-	/** A finished task run: push its branch and open the pull request (once). */
+	/**
+	 * A task run's turn finished: push its branch and open (or refresh) the pull
+	 * request, once per turn. A finished run whose session starts another turn — a
+	 * follow-up from the phone, the Agents view or the chat — is reported running
+	 * again, and finished again (more commits on the same PR) when that turn ends.
+	 */
 	private _checkTaskRuns(): void {
 		for (const [key, run] of celiadorTaskRunEntries()) {
-			if (run.finished) {
-				continue;
-			}
 			const session = this._sessionsService.model.sessions.find(s => s.resource.toString() === key);
 			if (!session) {
+				continue;
+			}
+			if (run.finished) {
+				if (session.status === ChatSessionStatus.InProgress || session.status === ChatSessionStatus.NeedsInput) {
+					run.finished = false;
+					this._saveTaskRuns();
+					this._logService.info(`[celiador-control] task ${run.taskId} is running a follow-up`);
+					void this._reportTask(run.taskId, { state: 'running' });
+				}
 				continue;
 			}
 			if (!run.worktree) {
@@ -356,9 +486,11 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			}
 			if (session.status === ChatSessionStatus.Completed) {
 				run.finished = true;
-				void this._finishTask(key, run);
+				this._saveTaskRuns();
+				void this._finishTask(run);
 			} else if (session.status === ChatSessionStatus.Failed) {
 				run.finished = true;
+				this._saveTaskRuns();
 				void this._reportTask(run.taskId, { state: 'failed', error: 'The agent run failed.' });
 			}
 		}
@@ -366,44 +498,57 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 
 	private async _resolveWorktree(run: ICeliadorTaskRun): Promise<URI | undefined> {
 		const path = await this._commandService.executeCommand<string | undefined>('celiador.taskWorktree', { repoRoot: run.repoRoot.fsPath, branch: run.branch }).catch(() => undefined);
-		if (path) {
+		if (path && run.worktree?.fsPath !== path) {
 			run.worktree = URI.file(path);
+			this._saveTaskRuns();
 		}
 		return run.worktree;
 	}
 
-	private async _finishTask(key: string, run: ICeliadorTaskRun): Promise<void> {
+	/**
+	 * Commit what the turn left, push, and open the pull request — or, after a
+	 * follow-up, find the one already open — then report `pr-open` with fresh PR
+	 * numbers. The run record is kept so later turns and merges find the worktree.
+	 */
+	private async _finishTask(run: ICeliadorTaskRun): Promise<void> {
 		try {
 			const worktree = run.worktree ?? await this._resolveWorktree(run);
 			if (!worktree) {
 				throw new Error(`couldn't find the run's worktree for branch ${run.branch} (was the name taken?)`);
 			}
-			const result = await this._commandService.executeCommand<{ ok: boolean; url?: string; error?: string }>('celiador.finishTask', { root: worktree.fsPath, title: run.title, issue: run.issue, attribution: this._configurationService.getValue<boolean>(TASK_ATTRIBUTION_SETTING) === true });
+			const result = await this._commandService.executeCommand<{ ok: boolean; url?: string; error?: string; pr?: ITaskPullRequest }>('celiador.finishTask', { root: worktree.fsPath, title: run.title, issue: run.issue, attribution: this._configurationService.getValue<boolean>(TASK_ATTRIBUTION_SETTING) === true });
 			if (!result?.ok || !result.url) {
 				throw new Error(result?.error ?? 'opening the pull request failed');
 			}
-			await this._reportTask(run.taskId, { state: 'pr-open', prUrl: result.url });
+			run.prUrl = result.url;
+			this._saveTaskRuns();
+			await this._reportTask(run.taskId, { state: 'pr-open', prUrl: result.url, pr: result.pr });
 			this._logService.info(`[celiador-control] task ${run.taskId} opened ${result.url}`);
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
+			if (run.prUrl) {
+				// A follow-up that couldn't push more: the pull request it already has still stands.
+				this._logService.warn(`[celiador-control] task ${run.taskId}: follow-up not pushed: ${message}`);
+				await this._reportTask(run.taskId, { state: 'pr-open', prUrl: run.prUrl });
+				return;
+			}
 			this._logService.warn(`[celiador-control] task ${run.taskId} could not open its pull request: ${message}`);
 			await this._reportTask(run.taskId, { state: 'failed', error: message });
-		} finally {
-			deleteCeliadorTaskRun(key);
 		}
 	}
 
-	/** Tell the daemon how a task is doing; best-effort. */
-	private async _reportTask(taskId: string, status: { state: 'running' | 'pr-open' | 'failed'; prUrl?: string; error?: string }): Promise<void> {
+	/** Tell the daemon how a task is doing (with this computer's name); best-effort. */
+	private async _reportTask(taskId: string, status: ITaskStatusReport): Promise<void> {
 		const auth = await this._token();
 		if (!auth) {
 			return;
 		}
+		const machine = await this._machineName();
 		try {
 			await fetch(`${this._daemonUrl()}/api/tasks/${encodeURIComponent(taskId)}/status`, {
 				method: 'POST',
 				headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
-				body: JSON.stringify(status),
+				body: JSON.stringify({ ...status, ...(machine ? { machine } : {}) }),
 			});
 		} catch (e) {
 			this._logService.trace(`[celiador-control] task status report failed: ${e}`);

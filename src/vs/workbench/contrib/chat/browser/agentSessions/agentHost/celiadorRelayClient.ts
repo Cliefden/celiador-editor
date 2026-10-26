@@ -45,6 +45,8 @@ export interface IRelayCommand {
 	readonly base?: string;
 	/** git.merge: how GitHub should merge the pull request (defaults to a merge commit). */
 	readonly method?: 'merge' | 'squash' | 'rebase';
+	/** git.merge: the branch whose pull request to merge (the worktree's HEAD when unset). */
+	readonly head?: string;
 }
 
 /** The kinds of filesystem command the phone can round-trip to this runner. */
@@ -62,6 +64,62 @@ export interface IRelayGitArgs {
 	readonly body?: string;
 	readonly base?: string;
 	readonly method?: 'merge' | 'squash' | 'rebase';
+	readonly head?: string;
+}
+
+/** The small, safe slice of a tool call's input the relay publishes with a `tool` event. */
+export interface IRelayToolInput {
+	readonly path?: string;
+	readonly command?: string;
+	readonly pattern?: string;
+}
+
+const MAX_TOOL_COMMAND_CHARS = 200;
+
+/**
+ * Celiador: what a `tool` event may say about its input — `{ path }` for
+ * read/edit/write-style tools (relative to `root` when inside it), `{ command }`
+ * for shell tools (truncated), `{ pattern }` for search tools. Never file
+ * contents or any other parameter. `toolInput` is the agent host's JSON string.
+ */
+export function summarizeRelayToolInput(toolName: string, toolInput: string | undefined, root: string | undefined): IRelayToolInput {
+	if (!toolInput) {
+		return {};
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(toolInput);
+	} catch {
+		return {};
+	}
+	if (!parsed || typeof parsed !== 'object') {
+		return {};
+	}
+	const input = parsed as Record<string, unknown>;
+	const pick = (...keys: string[]): string | undefined => {
+		for (const key of keys) {
+			const value = input[key];
+			if (typeof value === 'string' && value.trim()) {
+				return value.trim();
+			}
+		}
+		return undefined;
+	};
+	const command = pick('command', 'cmd');
+	if (command && (/bash|shell|terminal|run|exec|command/i.test(toolName) || !pick('file_path', 'path', 'notebook_path', 'filePath'))) {
+		return { command: command.length > MAX_TOOL_COMMAND_CHARS ? `${command.slice(0, MAX_TOOL_COMMAND_CHARS - 1)}…` : command };
+	}
+	const pattern = pick('pattern', 'query', 'glob');
+	if (pattern && /grep|glob|search|find/i.test(toolName)) {
+		return { pattern: pattern.slice(0, MAX_TOOL_COMMAND_CHARS) };
+	}
+	const path = pick('file_path', 'path', 'notebook_path', 'filePath');
+	if (path) {
+		const base = root?.replace(/[\\/]+$/, '');
+		const relative = base && (path.startsWith(`${base}/`) || path.startsWith(`${base}\\`)) ? path.slice(base.length + 1) : path;
+		return { path: relative.slice(0, 1024) };
+	}
+	return pattern ? { pattern: pattern.slice(0, MAX_TOOL_COMMAND_CHARS) } : {};
 }
 
 /** Debounce window for coalescing high-frequency events (streamed deltas). */
@@ -368,7 +426,7 @@ export class CeliadorRelayClient extends Disposable {
 		} else if ((cmd.kind === 'fs.list' || cmd.kind === 'fs.read' || cmd.kind === 'fs.write') && cmd.requestId) {
 			this._options.onFsCommand?.(cmd.kind, cmd.requestId, cmd.path ?? '', cmd.content);
 		} else if ((cmd.kind === 'git.status' || cmd.kind === 'git.diff' || cmd.kind === 'git.commit' || cmd.kind === 'git.revert' || cmd.kind === 'git.push' || cmd.kind === 'git.pr' || cmd.kind === 'git.merge') && cmd.requestId) {
-			this._options.onGitCommand?.(cmd.kind, cmd.requestId, { path: cmd.path, message: cmd.message, paths: cmd.paths, title: cmd.title, body: cmd.body, base: cmd.base, method: cmd.method });
+			this._options.onGitCommand?.(cmd.kind, cmd.requestId, { path: cmd.path, message: cmd.message, paths: cmd.paths, title: cmd.title, body: cmd.body, base: cmd.base, method: cmd.method, head: typeof cmd.head === 'string' ? cmd.head : undefined });
 		}
 	}
 

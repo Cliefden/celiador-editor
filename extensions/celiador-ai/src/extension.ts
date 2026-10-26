@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
+import { registerAgentsView } from './agents/agentsView';
 import { Auth } from './auth';
 import { registerCeliadorAuthProvider } from './authProvider';
 import { CeliadorChangesViewProvider } from './changesView';
@@ -92,6 +93,8 @@ export function activate(context: vscode.ExtensionContext): void {
   // Run review over the relay: the workbench bridge delegates git.* commands here.
   context.subscriptions.push(registerGitReview());
   context.subscriptions.push(registerTaskCommands());
+  // The Agents view (activity bar): the daemon's task queue + a run panel per task.
+  context.subscriptions.push(registerAgentsView(auth, () => daemonUrl(), context.extensionUri));
 
   context.subscriptions.push(
     vscode.commands.registerCommand('celiador.toggleInlineCompletions', async () => {
