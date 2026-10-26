@@ -284,8 +284,12 @@ export class RunPanel {
       try {
         await this.ctx.client.merge(task.id, method);
       } catch (err) {
-        // The daemon couldn't (older daemon, or no App and the run's editor is this one, offline from it):
-        // merge with this editor's GitHub sign-in, by branch.
+        // The daemon couldn't reach the pull request (older daemon without the route, or no App and
+        // the run's editor offline from it): merge with this editor's GitHub sign-in, by branch. Any
+        // other refusal (not mergeable, wrong state) is the pull request's answer — show it.
+        const unreachable = err instanceof DaemonError
+          && (err.status === 404 || err.status === 405 || (err.status === 409 && /editor offline/i.test(err.message)));
+        if (!unreachable) {throw err;}
         const info = this.info ?? await this.loadInfo();
         const result = await vscode.commands.executeCommand<{ ok: boolean; error?: string }>('celiador.relayGit', { kind: 'git.merge', head: task.branch, root: info?.worktree ?? info?.repoRoot, method });
         if (!result?.ok) {throw new Error(result?.error ?? (err instanceof Error ? err.message : String(err)));}
