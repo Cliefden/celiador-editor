@@ -461,7 +461,16 @@ async function finishTask(args: FinishTaskArgs): Promise<GitReviewResult> {
   const remote = pickRemote(repo);
   const target = parseGitHubRemote(remote?.pushUrl ?? remote?.fetchUrl);
   if (!remote || !target) {return { ok: false, error: `the repository's remote is not on GitHub` };}
-  await repo.push(remote.name, branch, true);
+  // The task branch is the agent's own. A follow-up turn may have amended or
+  // rebased what it already pushed, so push with a lease: it rewrites only if the
+  // remote still holds what this worktree last fetched (nobody else pushed).
+  // Plain git, since the git extension refuses forced pushes unless git.allowForcePush.
+  try {
+    await runGit(repo.rootUri.fsPath, ['push', '--force-with-lease', '--set-upstream', remote.name, `${branch}:${branch}`], 120_000);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message.split('\n').filter((l) => l.trim()).slice(-2).join(' ') : String(err);
+    return { ok: false, error: `couldn't push ${branch}: ${detail}` };
+  }
   const lines = [args.issue ? `Closes #${args.issue.number}` : ''];
   if (args.attribution) {
     // Opt-in (celiador.agentTasks.attribution): the growth loop's one line.

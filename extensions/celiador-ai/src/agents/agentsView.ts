@@ -27,6 +27,8 @@ type SidebarMessage =
 interface SidebarState {
   type: 'state';
   status: TaskFeed['status'];
+  /** "2 of 3 slots busy" — also drawn in the view itself, since a lone view's description is hidden. */
+  slots?: string;
   selected?: string;
   buckets: Array<{ id: string; label: string; tasks: Array<{ id: string; title: string; subtitle: string }> }>;
 }
@@ -58,10 +60,12 @@ class AgentsSidebar implements vscode.WebviewViewProvider {
     if (!this.view) {return;}
     const list = this.ctx.feed.list;
     const signedIn = this.ctx.feed.status !== 'signed-out';
-    this.view.description = signedIn && list.concurrency > 0 ? slotsLabel(list) : undefined;
+    const slots = signedIn && list.concurrency > 0 ? slotsLabel(list) : undefined;
+    this.view.description = slots;
     const state: SidebarState = {
       type: 'state',
       status: this.ctx.feed.status,
+      slots,
       selected: this.ctx.activeTaskId,
       buckets: bucketTasks(list.tasks).map((b) => ({
         id: b.id,
@@ -294,6 +298,7 @@ function sidebarHtml(cspSource: string): string {
         el('button', { class: 'btn primary', onclick: () => vscode.postMessage({ type: 'signIn' }) }, 'Sign In'));
       return;
     }
+    if (state.slots) root.append(el('div', { class: 'status' }, state.slots));
     root.append(el('button', { class: 'run-issue', onclick: () => vscode.postMessage({ type: 'runIssue' }) }, '+ Run an issue…'));
     if (state.status === 'offline') root.append(el('div', { class: 'status' }, 'Reconnecting to the daemon…'));
     if (!state.buckets.length) {

@@ -527,9 +527,10 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
 			if (run.prUrl) {
-				// A follow-up that couldn't push more: the pull request it already has still stands.
+				// A follow-up that couldn't push more: the pull request it already has still
+				// stands, but say why the new work isn't on it rather than look up to date.
 				this._logService.warn(`[celiador-control] task ${run.taskId}: follow-up not pushed: ${message}`);
-				await this._reportTask(run.taskId, { state: 'pr-open', prUrl: run.prUrl });
+				await this._reportTask(run.taskId, { state: 'pr-open', prUrl: run.prUrl, error: `The follow-up wasn't pushed: ${message}` });
 				return;
 			}
 			this._logService.warn(`[celiador-control] task ${run.taskId} could not open its pull request: ${message}`);

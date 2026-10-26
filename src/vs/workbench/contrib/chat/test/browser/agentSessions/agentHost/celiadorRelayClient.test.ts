@@ -21,6 +21,9 @@ suite('CeliadorRelayToolInput', () => {
 			summarizeRelayToolInput('Bash', JSON.stringify({ command: long }), '/wt').command?.length,
 			summarizeRelayToolInput('Edit', 'not json', '/wt'),
 			summarizeRelayToolInput('WebFetch', JSON.stringify({ url: 'https://x', prompt: 'p' }), '/wt'),
+			// The Claude host's own shapes for shell / search tools: the bare string.
+			summarizeRelayToolInput('Bash', 'git add greet.js README.md', '/wt'),
+			summarizeRelayToolInput('Glob', '**/*.ts', '/wt'),
 		], [
 			{ path: 'app/SessionView.swift' },
 			{ path: '/elsewhere/a.ts' },
@@ -29,6 +32,8 @@ suite('CeliadorRelayToolInput', () => {
 			200,
 			{},
 			{},
+			{ command: 'git add greet.js README.md' },
+			{ pattern: '**/*.ts' },
 		]);
 	});
 });

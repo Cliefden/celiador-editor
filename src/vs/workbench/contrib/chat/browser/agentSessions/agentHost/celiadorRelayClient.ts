@@ -90,9 +90,18 @@ export function summarizeRelayToolInput(toolName: string, toolInput: string | un
 	try {
 		parsed = JSON.parse(toolInput);
 	} catch {
-		return {};
+		parsed = undefined;
 	}
 	if (!parsed || typeof parsed !== 'object') {
+		// The Claude host hands shell and search tools their bare command / pattern
+		// rather than JSON (getClaudeToolInputString).
+		const text = toolInput.trim();
+		if (text && /bash|shell|terminal|run|exec|command/i.test(toolName)) {
+			return { command: text.length > MAX_TOOL_COMMAND_CHARS ? `${text.slice(0, MAX_TOOL_COMMAND_CHARS - 1)}…` : text };
+		}
+		if (text && /grep|glob|search|find/i.test(toolName)) {
+			return { pattern: text.slice(0, MAX_TOOL_COMMAND_CHARS) };
+		}
 		return {};
 	}
 	const input = parsed as Record<string, unknown>;
