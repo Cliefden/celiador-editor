@@ -27,7 +27,7 @@ import { IChatService } from '../../../common/chatService/chatService.js';
 import { ChatSessionStatus } from '../../../common/chatSessionsService.js';
 import { isAgentHostTarget } from '../agentSessions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
-import { CeliadorRelayClient, IRelayGitArgs, RelayFsKind, RelayGitKind } from './celiadorRelayClient.js';
+import { CeliadorRelayClient, IRelayGitArgs, RelayFsKind, RelayGitKind, summarizeRelayToolInput } from './celiadorRelayClient.js';
 import { getCeliadorTaskRun } from './celiadorTaskRuns.js';
 
 type PhoneCommandClassification = {
@@ -101,6 +101,11 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private static readonly EARLY_ACTION_TTL_MS = 60_000;
 	/** toolCallId → tool display name (captured at ChatToolCallStart, used to label approvals). */
 	private readonly _toolNameByCallId = new Map<string, string>();
+	/**
+	 * toolCallIds whose `tool` event waits for the final input (ChatToolCallReady),
+	 * so it can name the file / command / pattern; published bare if Ready never comes.
+	 */
+	private readonly _unpublishedTools = new Set<string>();
 	/** requestId (= toolCallId) → what a phone approve/deny must dispatch back. */
 	private readonly _pendingApprovals = new Map<string, { readonly chatChannel: string; readonly turnId: string; readonly toolCallId: string }>();
 	/** Texts of turns the phone itself dispatched — their ChatTurnStarted echo must
@@ -433,10 +438,18 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				}
 				break;
 			case ActionType.ChatToolCallStart:
+				// Published at Ready, once the input is final (see _unpublishedTools).
 				this._toolNameByCallId.set(action.toolCallId, action.toolName);
-				client.publish({ kind: 'tool', callId: action.toolCallId, name: action.toolName, input: {} });
+				this._unpublishedTools.add(action.toolCallId);
 				break;
 			case ActionType.ChatToolCallReady:
+				if (this._unpublishedTools.delete(action.toolCallId)) {
+					const name = this._toolNameByCallId.get(action.toolCallId) ?? 'tool';
+					// Only a path / command / pattern — never file contents (summarizeRelayToolInput).
+					const root = getCeliadorTaskRun(key)?.worktree ?? this._workspaceService.getWorkspace().folders[0]?.uri;
+					const input = typeof action.toolInput === 'string' ? summarizeRelayToolInput(name, action.toolInput, root?.fsPath) : {};
+					client.publish({ kind: 'tool', callId: action.toolCallId, name, input });
+				}
 				// `confirmed` unset → the tool is waiting for user approval. Relay it so
 				// the phone can approve/deny; a set `confirmed` means it auto-approved.
 				if (action.confirmed === undefined) {
@@ -453,6 +466,9 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			case ActionType.ChatToolCallConfirmed:
 			case ActionType.ChatToolCallComplete:
 				// Resolved (locally or remotely) — drop any stale pending approval.
+				if (this._unpublishedTools.delete(action.toolCallId)) {
+					client.publish({ kind: 'tool', callId: action.toolCallId, name: this._toolNameByCallId.get(action.toolCallId) ?? 'tool', input: {} });
+				}
 				this._pendingApprovals.delete(action.toolCallId);
 				this._toolNameByCallId.delete(action.toolCallId);
 				break;
