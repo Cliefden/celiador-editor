@@ -6,6 +6,7 @@
 import type * as http from 'http';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
+import { CELIADOR_MIRROR_HEADER } from '../../common/celiadorMirror.js';
 import {
 	ILoopbackProxyHandle,
 	ILoopbackProxyRuntime,
@@ -43,6 +44,14 @@ export interface ICeliadorDaemonProxySeed {
  */
 export interface ICeliadorDaemonProxyHandle extends ILoopbackProxyHandle {
 	setToken(token: string): void;
+	/**
+	 * Register (or, with `undefined`, forget) the mirror key of the session whose
+	 * SDK subprocess authenticates as `<nonce>.<sessionId>`. Every request of that
+	 * session is then forwarded with `X-Celiador-Mirror: <key>`, which lets the
+	 * daemon attribute its usage to the relay session the phone sees (contract §1).
+	 * The key is read per request, since a chat's owning session can change.
+	 */
+	setSessionMirror(sessionId: string, mirrorKey: (() => string | undefined) | undefined): void;
 }
 
 export interface ICeliadorDaemonProxyService {
@@ -62,19 +71,23 @@ export const ICeliadorDaemonProxyService = createDecorator<ICeliadorDaemonProxyS
 interface ICeliadorDaemonProxyState {
 	gatewayUrl: string;
 	token: string;
+	/** Proxy-bearer sessionId → the mirror key to stamp on its requests (see {@link ICeliadorDaemonProxyHandle.setSessionMirror}). */
+	readonly mirrors: Map<string, () => string | undefined>;
 }
 
 const PROXY_USER_FACING_NAME = 'CeliadorDaemonProxyService';
 
 /**
  * Headers that must not cross the proxy in either direction: hop-by-hop
- * headers, the inbound nonce credential (replaced by the daemon token), and
- * framing headers Node rewrites for the re-encoded body.
+ * headers, the inbound nonce credential (replaced by the daemon token), the
+ * mirror key (set by the proxy from its own registry, never by the
+ * subprocess), and framing headers Node rewrites for the re-encoded body.
  */
 const DROPPED_HEADERS = new Set([
 	'host',
 	'authorization',
 	'x-api-key',
+	CELIADOR_MIRROR_HEADER,
 	'connection',
 	'content-length',
 	'content-encoding',
@@ -108,7 +121,7 @@ export class CeliadorDaemonProxyService extends LoopbackProxyServer<ICeliadorDae
 	}
 
 	protected createState(seed: ICeliadorDaemonProxySeed): ICeliadorDaemonProxyState {
-		return { gatewayUrl: seed.gatewayUrl.replace(/\/+$/, ''), token: seed.token };
+		return { gatewayUrl: seed.gatewayUrl.replace(/\/+$/, ''), token: seed.token, mirrors: new Map() };
 	}
 
 	async start(seed: ICeliadorDaemonProxySeed): Promise<ICeliadorDaemonProxyHandle> {
@@ -120,6 +133,13 @@ export class CeliadorDaemonProxyService extends LoopbackProxyServer<ICeliadorDae
 			baseUrl: runtime.baseUrl,
 			nonce: runtime.nonce,
 			setToken: token => { runtime.state.token = token; },
+			setSessionMirror: (sessionId, mirrorKey) => {
+				if (mirrorKey) {
+					runtime.state.mirrors.set(sessionId, mirrorKey);
+				} else {
+					runtime.state.mirrors.delete(sessionId);
+				}
+			},
 			dispose: release,
 		};
 	}
@@ -169,6 +189,12 @@ export class CeliadorDaemonProxyService extends LoopbackProxyServer<ICeliadorDae
 		}
 		// The token is read per request, so a refresh applies to the next one.
 		headers.set('authorization', `Bearer ${runtime.state.token}`);
+		// Which relay session this request belongs to (cost per run): the daemon
+		// counts a request without it for the user only.
+		const mirrorKey = auth.sessionId ? runtime.state.mirrors.get(auth.sessionId)?.() : undefined;
+		if (mirrorKey) {
+			headers.set(CELIADOR_MIRROR_HEADER, mirrorKey);
+		}
 
 		const entry: IProxyInFlight = { ac: new AbortController(), res, clientGone: false };
 		runtime.inFlight.add(entry);

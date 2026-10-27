@@ -33,6 +33,7 @@ import {
 } from './anthropicErrors.js';
 import { tryParseClaudeModelId } from './claudeModelId.js';
 import { parseProxyBearer } from './claudeProxyAuth.js';
+import type { ICeliadorDaemonProxyHandle } from './celiadorDaemonProxyService.js'; // Celiador
 
 // #region Public types
 
@@ -77,7 +78,7 @@ export interface IClaudeProxyHandle extends ILoopbackProxyHandle {
 export type ClaudeTransport =
 	| { readonly kind: 'proxy'; readonly handle: IClaudeProxyHandle }
 	| { readonly kind: 'native' }
-	| { readonly kind: 'daemon'; readonly handle: ILoopbackProxyHandle };
+	| { readonly kind: 'daemon'; readonly handle: ICeliadorDaemonProxyHandle }; // Celiador: the daemon handle also takes the session's mirror key
 
 /**
  * A per-request credits report. CAPI returns the actual billed credits

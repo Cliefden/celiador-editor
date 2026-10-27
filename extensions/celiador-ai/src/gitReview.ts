@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
+import { composeTaskPrBody } from './agents/prBody';
 
 // The relay's run-review executor. The workbench relay bridge receives `git.*`
 // commands from the phone (via the daemon) and delegates here over the
@@ -394,6 +395,12 @@ interface FinishTaskArgs {
   issue?: { number: number; url: string };
   /** Add the opt-in "made with Celiador" line to the pull request body. */
   attribution?: boolean;
+  /** The run's final assistant message: the pull request body is written from it (stand-out contract §4). */
+  finalMessage?: string;
+  /** When the run started (epoch ms), for the body's elapsed time. */
+  startedAt?: number;
+  /** This computer's name, for the body's "Run by Celiador on …" line. */
+  machine?: string;
 }
 
 /** Run `git -C <cwd> <args>` and resolve its stdout (rejects on a non-zero exit). */
@@ -428,6 +435,18 @@ export async function machineName(): Promise<string> {
   return os.hostname().replace(/\.local$/i, '');
 }
 
+/** How many files the branch changes against origin's default branch; undefined when git can't tell. */
+async function changedFileCount(root: string): Promise<number | undefined> {
+  const base = await defaultBranch(root);
+  if (!base) {return undefined;}
+  try {
+    const out = await runGit(root, ['diff', '--name-only', `origin/${base}...HEAD`]);
+    return out.split('\n').filter((line) => line.trim().length > 0).length;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The worktree checked out on `branch` under the repository at `repoRoot`, if any. */
 async function worktreeForBranch(repoRoot: string, branch: string): Promise<string | undefined> {
   const out = await runGit(repoRoot, ['worktree', 'list', '--porcelain']);
@@ -444,9 +463,11 @@ async function worktreeForBranch(repoRoot: string, branch: string): Promise<stri
 
 /**
  * Finish an agent task: commit whatever the agent left uncommitted, push the
- * branch, and open its pull request (`Closes #n` when it came from an issue).
- * Uses the user's git identity, hooks and credentials, and the editor's GitHub
- * sign-in — without one, a compare link comes back instead (`created: false`).
+ * branch, and open its pull request, whose body ({@link composeTaskPrBody})
+ * tells the reviewer what the agent did and what it is unsure about (`Closes
+ * #n` when it came from an issue). Uses the user's git identity, hooks and
+ * credentials, and the editor's GitHub sign-in — without one, a compare link
+ * comes back instead (`created: false`).
  */
 async function finishTask(args: FinishTaskArgs): Promise<GitReviewResult> {
   const repo = await getRepo(args.root);
@@ -471,12 +492,16 @@ async function finishTask(args: FinishTaskArgs): Promise<GitReviewResult> {
     const detail = err instanceof Error ? err.message.split('\n').filter((l) => l.trim()).slice(-2).join(' ') : String(err);
     return { ok: false, error: `couldn't push ${branch}: ${detail}` };
   }
-  const lines = [args.issue ? `Closes #${args.issue.number}` : ''];
-  if (args.attribution) {
-    // Opt-in (celiador.agentTasks.attribution): the growth loop's one line.
-    lines.push('', '---', `Made with [Celiador](https://celiador.ai): an agent ran this${args.issue ? ` from issue #${args.issue.number}` : ''} and a person reviewed it.`);
-  }
-  const body = lines.join('\n');
+  // The body is built here from the final message (the daemon, which also gets
+  // it as `summary`, refreshes the body with the cost once it can).
+  const body = composeTaskPrBody({
+    issueNumber: args.issue?.number,
+    finalMessage: args.finalMessage,
+    machine: args.machine ?? await machineName().catch(() => undefined),
+    files: await changedFileCount(repo.rootUri.fsPath),
+    elapsedMs: typeof args.startedAt === 'number' ? Math.max(0, Date.now() - args.startedAt) : undefined,
+    attribution: args.attribution,
+  });
   const pr = await openPullRequest(target, branch, { kind: 'git.pr', title: args.title, body });
   if (!pr.ok && /no commits between/i.test(pr.error ?? '')) {
     return { ok: false, error: 'the agent made no changes' };

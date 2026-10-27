@@ -46,10 +46,16 @@ test('subtitles and meta', () => {
     taskSubtitle(task('b', { branch: '49-cancel', state: 'pr-open', prUrl: 'https://github.com/x/y/pull/8' }), 'Mac'),
     taskSubtitle(task('c', { branch: '61-sec', machine: 'Mac' }), 'Mac'),
     taskSubtitle(task('d', { branch: '63-guide', runner: 'cloud' }), 'Mac'),
-  ], ['52-relay · wants: run tests', '49-cancel · PR #8', '61-sec · this Mac', '63-guide · cloud']);
-  assert.equal(
+    taskSubtitle(task('f', { branch: '70-cost', runner: 'cloud', usage: { requests: 12, inputTokens: 38_400, outputTokens: 2_400, costUsd: 0.38 } }), 'Mac'),
+    taskSubtitle(task('g', { branch: '71-free', state: 'pr-open', pr: { number: 9, url: 'u' }, usage: { costUsd: 0.001 } }), 'Mac'),
+  ], ['52-relay · wants: run tests', '49-cancel · PR #8', '61-sec · this Mac', '63-guide · cloud', '70-cost · cloud · $0.38', '71-free · PR #9 · <$0.01']);
+  assert.deepEqual([
     runMeta(task('e', { branch: '49-cancel', state: 'pr-open', issue: { number: 49, title: 't', url: 'u' }, startedAt: '2026-10-26T10:00:00Z', finishedAt: '2026-10-26T10:12:00Z' }), undefined),
-    'Issue #49 · worktree 49-cancel · ran on this Mac, 12 min');
+    runMeta(task('h', { branch: '70-cost', state: 'pr-open', runner: 'cloud', startedAt: '2026-10-26T10:00:00Z', finishedAt: '2026-10-26T10:12:00Z', usage: { costUsd: 0.38 } }), undefined),
+  ], [
+    'Issue #49 · worktree 49-cancel · ran on this Mac, 12 min',
+    'worktree 70-cost · ran on the cloud, 12 min · $0.38',
+  ]);
 });
 
 test('parses numstat and unified diffs', () => {

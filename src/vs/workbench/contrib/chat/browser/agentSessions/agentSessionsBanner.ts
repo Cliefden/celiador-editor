@@ -48,8 +48,10 @@ export interface IAgentsBannerOptions {
 	readonly cssClass: string;
 	/** Identifies where the banner is displayed (e.g. 'welcomePage', 'agentSessionsWelcome'). */
 	readonly source: 'welcomePage' | 'agentSessionsWelcome';
-	/** Override the default button label. */
-	readonly label?: string;
+	// --- Start Celiador ---
+	/** The button label. Celiador has no default: the "Try out the new Agents window" upsell is gone, each caller says what its button does. */
+	readonly label: string;
+	// --- End Celiador ---
 	/** Optional callback invoked when the banner opens the Agents window. */
 	readonly onButtonClick?: () => void;
 }
@@ -66,7 +68,7 @@ export function createAgentsBanner(
 	defaultAccountService?: IDefaultAccountService,
 ): IAgentsBannerResult {
 	const disposables = new DisposableStore();
-	const label = options.label ?? localize('agentsBanner.tryAgentsAppLabel', "Try out the new Agents window");
+	const label = options.label; // Celiador: no "Try out the new Agents window" default
 
 	const icon = $('.codicon.icon-widget', { 'aria-hidden': 'true' });
 	const buttonLabel = $('span.category-title');

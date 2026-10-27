@@ -6,21 +6,20 @@
 // --- Start Celiador ---
 // Celiador: "Import Settings from Another Editor" — bring settings, keybindings,
 // snippets and extensions over from Cursor or VS Code, so switching takes a
-// minute. Offered once on first run when another editor is found and Celiador's
-// own settings are still empty; always available from the command palette.
+// minute. Available from the command palette; it is not offered unprompted on
+// startup (that notification was dropped in the stand-out round — the first
+// run should be quiet).
 
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { parse } from '../../../../base/common/json.js';
 import { applyEdits, setProperty } from '../../../../base/common/jsonEdit.js';
 import { FormattingOptions } from '../../../../base/common/jsonFormatter.js';
-import { Disposable } from '../../../../base/common/lifecycle.js';
 import { OS } from '../../../../base/common/platform.js';
 import { joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
-import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IExtensionGalleryService } from '../../../../platform/extensionManagement/common/extensionManagement.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
@@ -28,13 +27,10 @@ import { ServicesAccessor } from '../../../../platform/instantiation/common/inst
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
-import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
-import { IWorkbenchContribution, WorkbenchPhase, registerWorkbenchContribution2 } from '../../../common/contributions.js';
 import { IWorkbenchExtensionManagementService } from '../../../services/extensionManagement/common/extensionManagement.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
 import { IImportSource, IKeybindingRule, IMPORT_SOURCES, extensionIdsToImport, keybindingsToImport, settingsToImport, sourceExtensionsManifest, sourceUserDir } from '../common/celiadorImport.js';
 
-const OFFERED_KEY = 'celiador.import.offered';
 const FORMATTING: FormattingOptions = { tabSize: 4, insertSpaces: false, eol: '\n' };
 
 interface IImportReport {
@@ -75,7 +71,6 @@ interface IImportServices {
 	readonly extensionManagementService: IWorkbenchExtensionManagementService;
 	readonly logService: ILogService;
 	readonly notificationService: INotificationService;
-	readonly storageService: IStorageService;
 	readonly quickInputService: IQuickInputService;
 }
 
@@ -88,7 +83,6 @@ function importServices(accessor: ServicesAccessor): IImportServices {
 		extensionManagementService: accessor.get(IWorkbenchExtensionManagementService),
 		logService: accessor.get(ILogService),
 		notificationService: accessor.get(INotificationService),
-		storageService: accessor.get(IStorageService),
 		quickInputService: accessor.get(IQuickInputService),
 	};
 }
@@ -184,8 +178,7 @@ function summarize(source: IImportSource, report: IImportReport): string {
 }
 
 async function runImport(services: IImportServices, source: IImportSource): Promise<void> {
-	const { notificationService, storageService } = services;
-	storageService.store(OFFERED_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
+	const { notificationService } = services;
 	try {
 		const report = await importFrom(services, source);
 		notificationService.notify({ severity: Severity.Info, message: summarize(source, report) });
@@ -224,43 +217,5 @@ class ImportFromOtherEditorAction extends Action2 {
 	}
 }
 
-/** Offers the import once, on first run, when another editor is present and Celiador's settings are still empty. */
-class CeliadorImportOffer extends Disposable implements IWorkbenchContribution {
-	static readonly ID = 'workbench.contrib.celiadorImportOffer';
-
-	constructor(
-		@IStorageService storageService: IStorageService,
-		@IFileService fileService: IFileService,
-		@INativeEnvironmentService environmentService: INativeEnvironmentService,
-		@IUserDataProfileService userDataProfileService: IUserDataProfileService,
-		@INotificationService notificationService: INotificationService,
-		@ICommandService commandService: ICommandService,
-	) {
-		super();
-		if (storageService.getBoolean(OFFERED_KEY, StorageScope.APPLICATION, false)) {
-			return;
-		}
-		void (async () => {
-			const own = parse(await readText(fileService, userDataProfileService.currentProfile.settingsResource) ?? '{}');
-			if (own && typeof own === 'object' && Object.keys(own).length > 0) {
-				return; // already set up — don't nag
-			}
-			const [first] = await detectSources(fileService, environmentService.userHome);
-			if (!first) {
-				return;
-			}
-			notificationService.prompt(
-				Severity.Info,
-				localize('celiadorImport.offer', "Bring your settings, keybindings and extensions over from {0}?", first.label),
-				[
-					{ label: localize('celiadorImport.offer.import', "Import"), run: () => commandService.executeCommand(ImportFromOtherEditorAction.ID) },
-					{ label: localize('celiadorImport.offer.never', "Don't Ask Again"), run: () => storageService.store(OFFERED_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE) },
-				],
-			);
-		})();
-	}
-}
-
 registerAction2(ImportFromOtherEditorAction);
-registerWorkbenchContribution2(CeliadorImportOffer.ID, CeliadorImportOffer, WorkbenchPhase.Eventually);
 // --- End Celiador ---

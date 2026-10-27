@@ -22,6 +22,7 @@ import { ITelemetryService } from '../../../../../../platform/telemetry/common/t
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
 import { IAuthenticationService } from '../../../../../services/authentication/common/authentication.js';
+import { IChatService } from '../../../common/chatService/chatService.js';
 import { ChatSessionStatus, SessionType } from '../../../common/chatSessionsService.js';
 import { ChatSessionPosition, getResourceForNewChatSession, openChatSession } from '../../chatSessions/chatSessions.contribution.js';
 import { openSessionByResource } from '../agentSessionsOpener.js';
@@ -45,6 +46,8 @@ const TASK_ISSUE_COMMENT_SETTING = 'celiador.agentTasks.issueComment';
 const TASK_ATTRIBUTION_SETTING = 'celiador.agentTasks.attribution';
 /** Celiador: this workspace's agent task run records (see {@link ICeliadorTaskRun}). */
 const TASK_RUNS_STORAGE_KEY = 'celiador.agentTasks.runs';
+/** Celiador: the most of a run's final assistant message the pr-open report carries (stand-out contract §4). */
+const TASK_SUMMARY_MAX_CHARS = 8000;
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'celiador',
@@ -104,12 +107,14 @@ interface ITaskPullRequest {
 	readonly changedFiles?: number;
 }
 
-/** What `POST /api/tasks/:id/status` accepts from the editor (agents UI contract §2). */
+/** What `POST /api/tasks/:id/status` accepts from the editor (agents UI contract §2; `summary` per stand-out contract §4). */
 interface ITaskStatusReport {
 	readonly state: 'running' | 'pr-open' | 'failed';
 	readonly prUrl?: string;
 	readonly error?: string;
 	readonly pr?: ITaskPullRequest;
+	/** The run's final assistant message (≤ {@link TASK_SUMMARY_MAX_CHARS}), from which the daemon composes the pull request body. */
+	readonly summary?: string;
 }
 
 /** What `celiador.taskRunInfo` returns to the celiador-ai extension's Agents view. */
@@ -171,6 +176,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		@IAgentHostUntitledProvisionalSessionService private readonly _provisionalSessions: IAgentHostUntitledProvisionalSessionService,
 		@IAgentSessionsService private readonly _sessionsService: IAgentSessionsService,
 		@IStorageService private readonly _storageService: IStorageService,
+		@IChatService private readonly _chatService: IChatService,
 	) {
 		super();
 		this._register(toDisposable(() => this._abort.abort()));
@@ -487,7 +493,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			if (session.status === ChatSessionStatus.Completed) {
 				run.finished = true;
 				this._saveTaskRuns();
-				void this._finishTask(run);
+				void this._finishTask(run, session.resource);
 			} else if (session.status === ChatSessionStatus.Failed) {
 				run.finished = true;
 				this._saveTaskRuns();
@@ -506,23 +512,47 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 	}
 
 	/**
+	 * The run's final assistant message — what the agent said last, after its last
+	 * tool call — clipped for the pr-open report and the pull request body. Empty
+	 * when the session's chat model isn't in this window.
+	 */
+	private _finalMessage(sessionResource: URI): string | undefined {
+		const requests = this._chatService.getSession(sessionResource)?.getRequests();
+		const response = requests?.[requests.length - 1]?.response?.response;
+		const text = (response?.getFinalResponse() || response?.getMarkdown() || '').trim();
+		return text ? text.slice(0, TASK_SUMMARY_MAX_CHARS) : undefined;
+	}
+
+	/**
 	 * Commit what the turn left, push, and open the pull request — or, after a
 	 * follow-up, find the one already open — then report `pr-open` with fresh PR
-	 * numbers. The run record is kept so later turns and merges find the worktree.
+	 * numbers and the run's final message (`summary`), which the daemon turns into
+	 * the pull request body. The run record is kept so later turns and merges find
+	 * the worktree.
 	 */
-	private async _finishTask(run: ICeliadorTaskRun): Promise<void> {
+	private async _finishTask(run: ICeliadorTaskRun, sessionResource: URI): Promise<void> {
+		const summary = this._finalMessage(sessionResource);
 		try {
 			const worktree = run.worktree ?? await this._resolveWorktree(run);
 			if (!worktree) {
 				throw new Error(`couldn't find the run's worktree for branch ${run.branch} (was the name taken?)`);
 			}
-			const result = await this._commandService.executeCommand<{ ok: boolean; url?: string; error?: string; pr?: ITaskPullRequest }>('celiador.finishTask', { root: worktree.fsPath, title: run.title, issue: run.issue, attribution: this._configurationService.getValue<boolean>(TASK_ATTRIBUTION_SETTING) === true });
+			const result = await this._commandService.executeCommand<{ ok: boolean; url?: string; error?: string; pr?: ITaskPullRequest }>('celiador.finishTask', {
+				root: worktree.fsPath,
+				title: run.title,
+				issue: run.issue,
+				attribution: this._configurationService.getValue<boolean>(TASK_ATTRIBUTION_SETTING) === true,
+				// The pull request body (contract §4) is written from the final message.
+				finalMessage: summary,
+				startedAt: run.startedAt,
+				machine: await this._machineName(),
+			});
 			if (!result?.ok || !result.url) {
 				throw new Error(result?.error ?? 'opening the pull request failed');
 			}
 			run.prUrl = result.url;
 			this._saveTaskRuns();
-			await this._reportTask(run.taskId, { state: 'pr-open', prUrl: result.url, pr: result.pr });
+			await this._reportTask(run.taskId, { state: 'pr-open', prUrl: result.url, pr: result.pr, summary });
 			this._logService.info(`[celiador-control] task ${run.taskId} opened ${result.url}`);
 		} catch (e) {
 			const message = e instanceof Error ? e.message : String(e);
@@ -530,7 +560,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 				// A follow-up that couldn't push more: the pull request it already has still
 				// stands, but say why the new work isn't on it rather than look up to date.
 				this._logService.warn(`[celiador-control] task ${run.taskId}: follow-up not pushed: ${message}`);
-				await this._reportTask(run.taskId, { state: 'pr-open', prUrl: run.prUrl, error: `The follow-up wasn't pushed: ${message}` });
+				await this._reportTask(run.taskId, { state: 'pr-open', prUrl: run.prUrl, error: `The follow-up wasn't pushed: ${message}`, summary });
 				return;
 			}
 			this._logService.warn(`[celiador-control] task ${run.taskId} could not open its pull request: ${message}`);

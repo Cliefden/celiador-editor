@@ -56,6 +56,7 @@ import { ClaudeSdkPipeline, IRematerializer, type ISdkResolvedCustomizations } f
 import { SubagentRegistry } from './claudeSubagentRegistry.js';
 import { ClaudePermissionKind } from './claudeToolDisplay.js';
 import { ClaudeExplorationTracker } from './claudeExplorationTracker.js'; // Celiador
+import { celiadorMirrorKey } from '../../common/celiadorMirror.js'; // Celiador
 import { getSdkMcpServerEnablement, isCustomizationSdkEligible, resolveCustomizationEnablement } from '../shared/customizationEnablementGate.js';
 import { McpServerType, type IMcpServerConfiguration } from '../../../mcp/common/mcpPlatformTypes.js';
 import { AgentHostGitHubMcpServerEnabledConfigKey, platformRootSchema } from '../../common/agentHostSchema.js';
@@ -658,6 +659,7 @@ export class ClaudeAgentSession extends Disposable {
 		}
 		this._transportKind = ctx.transport.kind;
 		this._materializedTransport = ctx.transport;
+		this._registerCeliadorMirror(ctx.transport); // Celiador
 
 		const permissionMode = resolveCurrentPermissionMode(this._configurationService, launchOwner, this._chatChannelUri, this._inheritedPermissionMode, this._permissionModeFallback);
 		const plugins = this._desiredClientPluginConfigs(launchOwner);
@@ -830,6 +832,7 @@ export class ClaudeAgentSession extends Disposable {
 				// send retries.
 				this._transportKind = rebuildTransport.kind;
 				this._materializedTransport = rebuildTransport;
+				this._registerCeliadorMirror(rebuildTransport); // Celiador
 				if (this._pendingSwitchTransport) {
 					// Only a rebuild that actually consumed a pushed switch transport
 					// resolves the pending switch. An ordinary/SDK-recover rebuild that
@@ -1733,12 +1736,35 @@ export class ClaudeAgentSession extends Disposable {
 
 	// #endregion
 
+	// --- Start Celiador ---
+	/**
+	 * Celiador: tell the daemon proxy which relay session this chat's gateway
+	 * requests belong to (cost per run, contract §1). Keyed by the SDK session id
+	 * the subprocess authenticates with (`<nonce>.<sessionId>`); the key itself is
+	 * resolved per request from the owning agent-host session, which the relay
+	 * bridge mirrors to the phone under the very same key.
+	 */
+	private _registerCeliadorMirror(transport: ClaudeTransport): void {
+		if (transport.kind === 'daemon') {
+			transport.handle.setSessionMirror(this.sessionId, () => celiadorMirrorKey(this._owner.get()));
+		}
+	}
+
+	private _unregisterCeliadorMirror(): void {
+		const transport = this._materializedTransport;
+		if (transport?.kind === 'daemon') {
+			transport.handle.setSessionMirror(this.sessionId, undefined);
+		}
+	}
+	// --- End Celiador ---
+
 	override dispose(): void {
 		// Resolve parked deferreds before tearing the pipeline down so the
 		// SDK's canUseTool callback unwinds with a deny and the loop exits.
 		this._pendingPermissions.denyAll(false);
 		this._pendingUserInputs.denyAll({ response: ChatInputResponseKind.Cancel });
 		this._pendingClientToolCalls.rejectAll(new CancellationError());
+		this._unregisterCeliadorMirror(); // Celiador
 		super.dispose();
 	}
 }
