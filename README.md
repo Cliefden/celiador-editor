@@ -1,12 +1,12 @@
 # Celiador
 
-Celiador is an AI code editor — a **direct hard fork of [Visual Studio Code](https://github.com/microsoft/vscode)** (the `Code - OSS` source), with an AI agent (`celiador-ai`) built in. Think of the relationship to VS Code the way Cursor relates to it: we fork the source and edit it directly, rather than layering an extension on top of a stock install.
+Celiador turns GitHub issues into pull requests. Label an issue `celiador` and an agent runs it in its own git worktree on your Mac, comments on the issue, and opens a pull request that closes it; you review and merge from your phone or from the editor's Agents view. That loop is the product. This repository is the **Celiador editor**, the nicest runner for it: a **direct hard fork of [Visual Studio Code](https://github.com/microsoft/vscode)** (the `Code - OSS` source) with the agent (`celiador-ai`) and the Agents view built in. The same loop runs in stock VS Code and Cursor through the [Celiador Remote](https://github.com/Cliefden/celiador-remote) extension, and cloud runs are in progress. See [`ECOSYSTEM.md`](ECOSYSTEM.md) for how the pieces fit.
 
-- **Base:** `microsoft/vscode` — tracked via the `upstream` git remote (see [Staying current](#staying-current)).
-- **Backend:** the AI layer talks to the Celiador daemon (`celiador.ai`), which lives in the separate [`celiador-daemon`](https://github.com/Cliefden/celiador-daemon) repo. Sign-in is unified Supabase auth; the daemon holds the shared LLM key.
+- **Base:** `microsoft/vscode` — tracked via the `upstream` git remote (see [Staying current](#staying-current)). We fork the source and edit it directly, the way Cursor does, rather than layering an extension on a stock install.
+- **Backend:** the editor talks to the Celiador daemon (`celiador.ai`), which lives in the separate [`daemon`](https://github.com/Cliefden/daemon) repo: task queue, relay to the phone, agent proxy. Sign-in is unified Supabase auth; the daemon holds the shared LLM key.
 - **Extensions marketplace:** [Open VSX](https://open-vsx.org) (not the Microsoft Marketplace).
 
-> This repo *is* the editor. The previous VSCodium build-orchestrator approach (`celiador-editor`) is retired to reference-only — a hard fork lets us edit editor core directly instead of maintaining a patch stack.
+> This repo *is* the editor. The previous VSCodium build-orchestrator approach (`celiador-editor-legacy`) is retired to reference-only — a hard fork lets us edit editor core directly instead of maintaining a patch stack.
 
 ## Requirements (macOS, Apple Silicon)
 
