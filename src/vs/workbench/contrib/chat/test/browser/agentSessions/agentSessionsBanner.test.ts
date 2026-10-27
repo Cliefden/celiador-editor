@@ -65,7 +65,7 @@ suite('AgentsBanner', () => {
 			{
 				cssClass: 'agents-banner',
 				source: options.source ?? 'welcomePage',
-				label: options.label,
+				label: options.label ?? 'Try out the new Agents window', // Celiador: the factory no longer has a default label
 				onButtonClick: () => onButtonClickCalls++,
 			},
 			commandService,

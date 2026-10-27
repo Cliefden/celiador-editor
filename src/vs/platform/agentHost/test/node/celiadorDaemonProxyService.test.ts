@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import * as http from 'http';
+import type * as http from 'http';
 import { AddressInfo } from 'net';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../log/common/log.js';
@@ -19,6 +19,8 @@ interface IRecordedRequest {
 	readonly authorization: string | undefined;
 	readonly apiKey: string | undefined;
 	readonly anthropicVersion: string | undefined;
+	/** `X-Celiador-Mirror`: which relay session the request's usage belongs to. */
+	readonly mirror: string | undefined;
 	readonly body: string;
 }
 
@@ -29,44 +31,46 @@ class FakeDaemonGateway {
 	responseBody = '{"id":"msg_1","type":"message"}';
 	/** When set, the response is an SSE stream of these frames. */
 	sseFrames: string[] | undefined;
-	private readonly _server: http.Server;
+	private _server: http.Server | undefined;
 	baseUrl = '';
 
-	constructor() {
-		this._server = http.createServer((req, res) => {
-			const chunks: Buffer[] = [];
-			req.on('data', chunk => chunks.push(chunk));
-			req.on('end', () => {
-				this.requests.push({
-					method: req.method,
-					url: req.url,
-					authorization: req.headers['authorization'],
-					apiKey: typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'] : undefined,
-					anthropicVersion: typeof req.headers['anthropic-version'] === 'string' ? req.headers['anthropic-version'] : undefined,
-					body: Buffer.concat(chunks).toString('utf8'),
-				});
-				if (this.sseFrames) {
-					res.writeHead(this.status, { 'Content-Type': 'text/event-stream' });
-					for (const frame of this.sseFrames) {
-						res.write(frame);
-					}
-					res.end();
-					return;
-				}
-				res.writeHead(this.status, { 'Content-Type': 'application/json' });
-				res.end(this.responseBody);
+	private _handle(req: http.IncomingMessage, res: http.ServerResponse): void {
+		const chunks: Buffer[] = [];
+		req.on('data', chunk => chunks.push(chunk));
+		req.on('end', () => {
+			this.requests.push({
+				method: req.method,
+				url: req.url,
+				authorization: req.headers.authorization,
+				apiKey: typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'] : undefined,
+				anthropicVersion: typeof req.headers['anthropic-version'] === 'string' ? req.headers['anthropic-version'] : undefined,
+				mirror: typeof req.headers['x-celiador-mirror'] === 'string' ? req.headers['x-celiador-mirror'] : undefined,
+				body: Buffer.concat(chunks).toString('utf8'),
 			});
+			if (this.sseFrames) {
+				res.writeHead(this.status, { 'Content-Type': 'text/event-stream' });
+				for (const frame of this.sseFrames) {
+					res.write(frame);
+				}
+				res.end();
+				return;
+			}
+			res.writeHead(this.status, { 'Content-Type': 'application/json' });
+			res.end(this.responseBody);
 		});
 	}
 
 	async start(): Promise<void> {
-		await new Promise<void>(resolve => this._server.listen(0, '127.0.0.1', () => resolve()));
-		this.baseUrl = `http://127.0.0.1:${(this._server.address() as AddressInfo).port}/api/anthropic`;
+		const httpModule = await import('http');
+		const server = httpModule.createServer((req, res) => this._handle(req, res));
+		this._server = server;
+		await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+		this.baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/anthropic`;
 	}
 
 	dispose(): void {
-		this._server.closeAllConnections();
-		this._server.close();
+		this._server?.closeAllConnections();
+		this._server?.close();
 	}
 }
 
@@ -92,6 +96,8 @@ suite('CeliadorDaemonProxyService', () => {
 				'content-type': 'application/json',
 				'anthropic-version': '2023-06-01',
 				'x-api-key': 'leaked-user-key',
+				// A subprocess must not be able to pick whose run it bills.
+				'x-celiador-mirror': 'spoofed',
 			},
 			body,
 		}).then(async res => ({ status: res.status, body: await res.text() }));
@@ -108,9 +114,23 @@ suite('CeliadorDaemonProxyService', () => {
 				authorization: 'Bearer token-1',
 				apiKey: undefined,
 				anthropicVersion: '2023-06-01',
+				mirror: undefined,
 				body: '{"model":"claude","messages":[]}',
 			}],
 		});
+	});
+
+	test('stamps the registered mirror key of the bearer\'s session, read per request, and none once forgotten', async () => {
+		const { gateway, handle } = await setup();
+		let owner = 'ahp-session:/run-1';
+		handle.setSessionMirror('session-1', () => owner);
+		await post(handle, '/v1/messages', '{}');
+		owner = 'ahp-session:/run-2'; // the chat moved to another session
+		await post(handle, '/v1/messages', '{}');
+		await post(handle, '/v1/messages', '{}', `${handle.nonce}.session-2`); // another session, never registered
+		handle.setSessionMirror('session-1', undefined);
+		await post(handle, '/v1/messages', '{}');
+		assert.deepStrictEqual(gateway.requests.map(r => r.mirror), ['ahp-session:/run-1', 'ahp-session:/run-2', undefined, undefined]);
 	});
 
 	test('a refreshed token is presented on the very next request, with no restart', async () => {

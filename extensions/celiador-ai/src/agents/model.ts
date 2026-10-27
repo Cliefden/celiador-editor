@@ -41,6 +41,8 @@ export interface Task {
     mergeable?: boolean;
     updatedAt?: string;
   };
+  /** The linked session's usage (stand-out contract §1): what the run cost so far. */
+  usage?: { requests?: number; inputTokens?: number; outputTokens?: number; costUsd?: number };
 }
 
 /** `GET /api/tasks`. */
@@ -123,7 +125,19 @@ function clip(text: string, max: number): string {
   return one.length > max ? `${one.slice(0, max - 1)}…` : one;
 }
 
-/** The mono second line of a sidebar row: `<branch> · <what it waits on | where | PR #n>`. */
+/** "$0.38"; "<$0.01" for a run that cost something but rounds to nothing. */
+export function formatCost(usd: number): string {
+  if (usd > 0 && usd < 0.005) {return '<$0.01';}
+  return `$${usd.toFixed(2)}`;
+}
+
+/** The run's cost for a row or meta line (" · $0.38"), empty until the daemon reports one. */
+function costTail(task: Task): string {
+  const usd = task.usage?.costUsd;
+  return typeof usd === 'number' && Number.isFinite(usd) ? ` · ${formatCost(usd)}` : '';
+}
+
+/** The mono second line of a sidebar row: `<branch> · <what it waits on | where | PR #n>[ · $cost]`. */
 export function taskSubtitle(task: Task, localMachine: string | undefined): string {
   let tail: string;
   if (task.awaiting && !isTerminal(task.state)) {
@@ -138,7 +152,7 @@ export function taskSubtitle(task: Task, localMachine: string | undefined): stri
   } else {
     tail = whereLabel(task, localMachine);
   }
-  return `${task.branch} · ${tail}`;
+  return `${task.branch} · ${tail}${costTail(task)}`;
 }
 
 /** "12 min", "1 h 5 min", "<1 min" between two instants. */
@@ -151,7 +165,7 @@ export function formatDuration(ms: number): string {
   return m ? `${h} h ${m} min` : `${h} h`;
 }
 
-/** The run panel's mono meta line: "Issue #49 · worktree <branch> · ran on this Mac, 12 min". */
+/** The run panel's mono meta line: "Issue #49 · worktree <branch> · ran on this Mac, 12 min[ · $0.38]". */
 export function runMeta(task: Task, localMachine: string | undefined, now = Date.now()): string {
   const parts: string[] = [];
   if (task.issue) {parts.push(`Issue #${task.issue.number}`);}
@@ -163,7 +177,7 @@ export function runMeta(task: Task, localMachine: string | undefined, now = Date
   const took = start !== undefined && end !== undefined && end >= start ? `, ${formatDuration(end - start)}` : '';
   if (task.state === 'queued') {parts.push('queued');}
   else {parts.push(`${running ? 'running on' : 'ran on'} ${where === 'cloud' ? 'the cloud' : where}${took}`);}
-  return parts.join(' · ');
+  return `${parts.join(' · ')}${costTail(task)}`;
 }
 
 // --- git output ---------------------------------------------------------------

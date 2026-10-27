@@ -12,6 +12,7 @@ import { ICommandService } from '../../../../../../platform/commands/common/comm
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IAgentHostConnectionsService, LOCAL_AGENT_HOST_SCHEME_PREFIX } from '../../../../../../platform/agentHost/common/agentHostConnectionsService.js';
+import { celiadorMirrorKey } from '../../../../../../platform/agentHost/common/celiadorMirror.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { IAgentSubscription } from '../../../../../../platform/agentHost/common/state/agentSubscription.js';
 import { ActionType } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
@@ -338,9 +339,11 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	 * The agent session's identity across windows: every editor window and the
 	 * Agents window run this bridge over the same machine-wide agent host, so the
 	 * daemon keys on the backend session to keep one mirror (and one phone entry).
+	 * The agent host's daemon proxy stamps the same key ({@link celiadorMirrorKey})
+	 * on the session's gateway requests, which is how its usage lands on this mirror.
 	 */
 	private _mirrorKey(resource: URI): string {
-		return this._backendSession(resource).toString();
+		return celiadorMirrorKey(this._backendSession(resource));
 	}
 
 	/**

@@ -395,6 +395,7 @@ class FakeCeliadorDaemonProxyService implements ICeliadorDaemonProxyService {
 			baseUrl: this.baseUrl,
 			nonce: this.nonce,
 			setToken: token => { this.tokens.push(token); },
+			setSessionMirror: () => { },
 			dispose: () => { this.disposeCount++; },
 		};
 	}
