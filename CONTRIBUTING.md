@@ -1,3 +1,15 @@
+# Contributing to Celiador
+
+Work starts as a GitHub issue. Label it `celiador` and an agent picks it up in its own worktree and opens the PR; review it from the phone or the Agents view. Every change to Celiador ships through Celiador.
+
+Write the issue the way you would brief a colleague: what to change, where, and what not to touch. The agent comments on the issue when it is picked up and again with the pull request link. If you would rather do the change by hand, open a pull request against `main` that references the issue; it goes through the same review.
+
+This repository is a hard fork of VS Code. For editor-core work, the coding guidelines and validation strategy in [`.claude/CLAUDE.md`](.claude/CLAUDE.md) apply (TypeScript style, `scripts/test.sh --grep`, when to type-check). Keep Celiador changes to `src/vs/**` localized and marked as Celiador edits so upstream rebases stay tractable; see [`ECOSYSTEM.md`](ECOSYSTEM.md) for how this repository relates to the daemon, Celiador Remote, the iPhone app and the site.
+
+The rest of this file is the upstream VS Code contributor guide, kept for reference on how to write a good bug report.
+
+---
+
 # Contributing to VS Code
 
 Welcome, and thank you for your interest in contributing to VS Code!
