@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { disposableTimeout } from '../../../../../../base/common/async.js';
 import { VSBuffer } from '../../../../../../base/common/buffer.js';
 import { Disposable, DisposableStore, IReference } from '../../../../../../base/common/lifecycle.js';
 import { isEqualOrParent, joinPath } from '../../../../../../base/common/resources.js';
@@ -78,6 +79,16 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 
 	/** sessionResource.toString() → the relay client mirroring it. */
 	private readonly _clients = new Map<string, CeliadorRelayClient>();
+	/**
+	 * Every window sees a session go active at the same moment and races for its
+	 * one mirror (the daemon keeps the first claim). The window that started the
+	 * session as a task run is the only one that knows its task and worktree, so
+	 * it claims at once; a window with no run record for the session waits this
+	 * long first. sessionResource.toString() → when the wait began.
+	 */
+	private readonly _deferredClaims = new Map<string, number>();
+	private readonly _deferredClaimTimers = this._register(new DisposableStore());
+	private static readonly DEFERRED_CLAIM_MS = 1_500;
 	/** sessionResource.toString() → last published status (de-dupes repeats). */
 	private readonly _lastStatus = new Map<string, ChatSessionStatus>();
 	/** sessionResource.toString() → its session-state subscription + resolved chat channels (primary = where instructions dispatch). */
@@ -166,6 +177,11 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				this._disposeClient(key);
 			}
 		}
+		for (const key of [...this._deferredClaims.keys()]) {
+			if (!live.has(key)) {
+				this._deferredClaims.delete(key);
+			}
+		}
 
 		for (const [key, session] of live) {
 			const active = session.status === ChatSessionStatus.InProgress || session.status === ChatSessionStatus.NeedsInput;
@@ -175,6 +191,10 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				// Only start relaying once a session is actually active — don't mirror
 				// the whole completed-session history on startup.
 				if (!active) {
+					continue;
+				}
+				// Let the window that runs this session as a task claim its mirror first.
+				if (!getCeliadorTaskRun(key) && !this._claimDue(key)) {
 					continue;
 				}
 				client = this._createClient(key, session.resource);
@@ -205,6 +225,27 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			// dropped when the session leaves the model (above) or on dispose.
 			this._publishStatus(key, session.status, client);
 		}
+	}
+
+	/**
+	 * Whether a session this window has no task-run record for may claim its mirror
+	 * yet: false on first sight (and a reconcile is scheduled for when the wait is
+	 * over), true once {@link DEFERRED_CLAIM_MS} has passed. The early-action buffer
+	 * covers whatever streams in the meantime.
+	 */
+	private _claimDue(key: string): boolean {
+		const since = this._deferredClaims.get(key);
+		const now = Date.now();
+		if (since === undefined) {
+			this._deferredClaims.set(key, now);
+			disposableTimeout(() => this._reconcile(), CeliadorRelayBridge.DEFERRED_CLAIM_MS, this._deferredClaimTimers);
+			return false;
+		}
+		if (now - since < CeliadorRelayBridge.DEFERRED_CLAIM_MS) {
+			return false;
+		}
+		this._deferredClaims.delete(key);
+		return true;
 	}
 
 	private _createClient(key: string, resource: URI): CeliadorRelayClient {
