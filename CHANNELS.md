@@ -30,6 +30,13 @@ build/celiador/channel.sh prod        # restore before committing anything
   (`src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/celiadorRelayBridge.ts`).
 All three fall back to `https://celiador.ai` when the field is unset.
 
+The dev and test channels also get Celindor's icon banner: `channel.sh` stamps
+`resources/darwin/code.icns` (through an `iconutil` round-trip and
+`build/celiador/icon-banner.swift`, no ImageMagick needed) red with the short
+commit for dev, green with the tag at `HEAD` (else the commit) for test; an
+optional second argument sets the label (`channel.sh test v0.2.0`). The
+committed icon is always prod; `channel.sh prod` restores it.
+
 `updateUrl` is what the built-in updater polls (`/api/update/:platform/:quality/:commit`),
 so a dev build only ever sees dev builds and a test build only test builds: the
 release script reads `celiadorChannel` from the packaged app's `product.json` and

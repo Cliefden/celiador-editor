@@ -88,8 +88,9 @@ jobs:
         run: node build/lib/builtInExtensions.ts
 
       - name: Select channel
-        # Overlays product.json for test/dev (app identity, daemon, update feed);
-        # prod restores the committed file. The gulp output is then named after
+        # Overlays product.json for test/dev (app identity, daemon, update feed)
+        # and stamps the icon (red + commit for dev, green + tag for test); prod
+        # restores the committed files. The gulp output is then named after
         # nameLong ("Celiador Test.app"), so later steps find the bundle by glob.
         run: build/celiador/channel.sh "${{ inputs.channel || 'prod' }}"
 
@@ -154,8 +155,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Restore product.json
+      - name: Restore product.json and the icon
         # The self-hosted runner keeps its checkout; never leave an overlaid
-        # product.json behind for the next run or a local build on this Mac.
+        # product.json or a stamped icon behind for the next run or a local build.
         if: always()
-        run: git checkout -- product.json
+        run: git checkout -- product.json resources/darwin/code.icns
