@@ -124,7 +124,11 @@ STAGE="$OUT/stage"
 STAGE_APP="$STAGE/Celiador.app"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
-ditto "$APP" "$STAGE_APP"
+# cp -R, not ditto: ditto preserves timestamps, and everything unpacked from the
+# Electron zip has none (= 1 Jan 1980), which Finder then shows as the app's
+# "Created" date and the updater's zip carries along. A plain copy stamps every
+# file with the release time; symlinks and modes survive, xattrs are dropped next.
+cp -R "$APP" "$STAGE_APP"
 # Resource forks / Finder info make codesign refuse the bundle.
 xattr -cr "$STAGE_APP"
 
