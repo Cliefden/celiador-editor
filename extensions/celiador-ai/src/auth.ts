@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
 import { getRestrictedSetting } from './config';
-import { resolveDaemonUrl } from './productConfig';
+import { resolveDaemonUrl, resolveUrlProtocol } from './productConfig';
 
 // Dependency-free Supabase/GoTrue client for the editor. Supports PKCE-protected
 // OAuth and magic-link flows. Session stored in VS Code SecretStorage, access token
@@ -17,9 +17,14 @@ const REFRESH_LEAD_SECONDS = 120;
 /** Retry delay after a failed background refresh (e.g. offline). */
 const REFRESH_RETRY_MS = 60_000;
 const PKCE_KEY = 'celiador.pkce';
-// VS Code routes deep links as celiador://<publisher>.<extension><path> to the
-// extension's UriHandler. GoTrue's redirect allowlist must contain this exactly.
-export const AUTH_REDIRECT = 'celiador://celiador.celiador-ai/auth-callback';
+// VS Code routes deep links as <urlProtocol>://<publisher>.<extension><path> to
+// the extension's UriHandler. The scheme is the build channel's (product.json
+// `urlProtocol`: celiador, celiador-test, celiador-dev — CHANNELS.md), so each
+// channel returns to its own app. The environment's GoTrue redirect allowlist
+// must contain it.
+export function authRedirect(): string {
+  return `${resolveUrlProtocol()}://celiador.celiador-ai/auth-callback`;
+}
 
 export interface Session {
   access_token: string;
@@ -147,7 +152,7 @@ export class Auth {
     const { base, anonKey } = await this.supa();
     const { verifier, challenge } = await this.generatePkce();
     await this.storePkce(verifier);
-    const url = `${base}/auth/v1/otp?redirect_to=${encodeURIComponent(AUTH_REDIRECT)}`;
+    const url = `${base}/auth/v1/otp?redirect_to=${encodeURIComponent(authRedirect())}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', apikey: anonKey, Authorization: `Bearer ${anonKey}` },
@@ -168,7 +173,7 @@ export class Auth {
     const { base } = await this.supa();
     const { verifier, challenge } = await this.generatePkce();
     await this.storePkce(verifier);
-    const url = `${base}/auth/v1/authorize?provider=github&redirect_to=${encodeURIComponent(AUTH_REDIRECT)}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=s256`;
+    const url = `${base}/auth/v1/authorize?provider=github&redirect_to=${encodeURIComponent(authRedirect())}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=s256`;
     await vscode.env.openExternal(vscode.Uri.parse(url));
   }
 

@@ -17,9 +17,14 @@ on:
         required: false
         default: ""
       publish:
-        description: Publish to celiador.ai (off = build + notarize, upload as a workflow artifact only)
+        description: Publish to the channel's environment (off = build + notarize, upload as a workflow artifact only)
         type: boolean
         default: true
+      channel:
+        description: Build channel (CHANNELS.md) — which app identity, daemon and update feed
+        type: choice
+        options: [prod, test, dev]
+        default: prod
 
 concurrency:
   group: ${{ github.workflow }}
@@ -82,6 +87,12 @@ jobs:
       - name: Download built-in extensions
         run: node build/lib/builtInExtensions.ts
 
+      - name: Select channel
+        # Overlays product.json for test/dev (app identity, daemon, update feed);
+        # prod restores the committed file. The gulp output is then named after
+        # nameLong ("Celiador Test.app"), so later steps find the bundle by glob.
+        run: build/celiador/channel.sh "${{ inputs.channel || 'prod' }}"
+
       - name: Build app
         run: npm run gulp vscode-darwin-${{ env.VSCODE_ARCH }}-min
 
@@ -89,14 +100,14 @@ jobs:
         # The build packages whatever out/ exists; without this file the app ships
         # with no language model at all, invisible until someone opens chat.
         run: |
-          EXT="../VSCode-darwin-${VSCODE_ARCH}/Celiador.app/Contents/Resources/app/extensions/celiador-ai/out/extension.js"
+          EXT="$(ls -d ../VSCode-darwin-${VSCODE_ARCH}/*.app)/Contents/Resources/app/extensions/celiador-ai/out/extension.js"
           test -f "$EXT" || { echo "::error::celiador-ai has no compiled entry point at $EXT"; exit 1; }
 
       - name: Assert no proprietary Copilot code shipped
         # @github/copilot* and @vscode/copilot-api are GitHub-proprietary and must
         # stay devDependencies. This is the check that they did.
         run: |
-          APPDIR="../VSCode-darwin-${VSCODE_ARCH}/Celiador.app/Contents/Resources/app/node_modules"
+          APPDIR="$(ls -d ../VSCode-darwin-${VSCODE_ARCH}/*.app)/Contents/Resources/app/node_modules"
           for pkg in @github/copilot @github/copilot-sdk @vscode/copilot-api; do
             if [ -d "$APPDIR/$pkg" ]; then
               echo "::error::$pkg was packaged into the app"; exit 1
@@ -142,3 +153,9 @@ jobs:
             ${{ runner.temp }}/celiador-release/*.json
           if-no-files-found: error
           retention-days: 14
+
+      - name: Restore product.json
+        # The self-hosted runner keeps its checkout; never leave an overlaid
+        # product.json behind for the next run or a local build on this Mac.
+        if: always()
+        run: git checkout -- product.json
