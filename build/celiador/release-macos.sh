@@ -2,8 +2,11 @@
 # Celiador: sign → notarize → staple → package → manifest [→ publish] the packaged macOS app.
 #
 # Input is the gulp output (`npm run gulp vscode-darwin-arm64-min` writes
-# ../VSCode-darwin-arm64/Celiador.app). The app is COPIED into the output dir and
-# signed there, so the build you run locally is never touched.
+# ../VSCode-darwin-arm64/<nameLong>.app — Celiador.app, or "Celiador Test.app" /
+# "Celiador Dev.app" after build/celiador/channel.sh, see CHANNELS.md). The app is
+# COPIED into the output dir and signed there, so the build you run locally is
+# never touched. The app's own product.json names the channel, which picks the
+# environment it is published to.
 #
 # Produces, in --out (default .build/celiador-release):
 #   Celiador-darwin-arm64-<version>-<commit7>.zip  stapled app, zipped — the only payload
@@ -17,7 +20,7 @@
 # never names a file that isn't there yet. See docs/RELEASING.md.
 #
 # Usage: build/celiador/release-macos.sh [options]
-#   --app <Celiador.app>    default ../VSCode-darwin-arm64/Celiador.app
+#   --app <Celiador.app>    default ../VSCode-darwin-arm64/<product.json nameLong>.app
 #   --identity <name>       default $CELIADOR_SIGN_IDENTITY, else the Developer ID Application identity
 #   --keychain <path>       keychain holding that identity (default $CELIADOR_SIGNING_KEYCHAIN, else the search list)
 #   --out <dir>             default .build/celiador-release
@@ -25,15 +28,19 @@
 #   --skip-notarize         sign + package only — local checks with an Apple Development identity;
 #                           Gatekeeper will NOT accept the result on another Mac
 #   --publish               rsync to $CELIADOR_RELEASE_HOST:$CELIADOR_RELEASE_DIR
-#                           (default cliefden.com:daemon/releases)
-#   --manifest-url <url>    current manifest, merged before writing (default https://celiador.ai/api/releases)
+#                           (default cliefden.com, dir per channel: daemon/releases for prod,
+#                           envs/<test|dev>/daemon/releases otherwise)
+#   --manifest-url <url>    current manifest, merged before writing
+#                           (default https://<channel host>/api/releases)
 #
 # Needs: Xcode command line tools (codesign, ditto, hdiutil, stapler), node, rsync, and
 # `asc` signed in (notarization goes through the App Store Connect API key: `asc auth status`).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-APP="$ROOT/../VSCode-darwin-arm64/Celiador.app"
+# The gulp build names the bundle after product.json's nameLong ("Celiador Dev.app"
+# for the dev channel — CHANNELS.md), so the default follows the checkout's product.json.
+APP="$ROOT/../VSCode-darwin-arm64/$(node -p 'require(process.argv[1]).nameLong' "$ROOT/product.json").app"
 IDENTITY="${CELIADOR_SIGN_IDENTITY:-Developer ID Application: Stefan Crafoord-Wiklund (XPNFDWPFAV)}"
 # A dedicated keychain holding the identity (the Actions runner's launchd
 # session cannot see the login keychain); empty = the default search list.
@@ -42,9 +49,11 @@ OUT="$ROOT/.build/celiador-release"
 NOTES=""
 SKIP_NOTARIZE=0
 PUBLISH=0
-MANIFEST_URL="${CELIADOR_MANIFEST_URL:-https://celiador.ai/api/releases}"
+# Manifest URL and release dir default per channel once the app's product.json
+# has been read (below); the env vars / flags override.
+MANIFEST_URL="${CELIADOR_MANIFEST_URL:-}"
 RELEASE_HOST="${CELIADOR_RELEASE_HOST:-cliefden.com}"
-RELEASE_DIR="${CELIADOR_RELEASE_DIR:-daemon/releases}"
+RELEASE_DIR="${CELIADOR_RELEASE_DIR:-}"
 PLATFORM="darwin-arm64"
 ENT="$ROOT/build/azure-pipelines/darwin"
 
@@ -89,11 +98,24 @@ fi
 
 # ── What we're releasing: the app's own product.json is the source of truth ────
 PRODUCT="$APP/Contents/Resources/app/product.json"
-read -r COMMIT VERSION QUALITY BUILD_TS BUILD_NO < <(node -e '
+read -r COMMIT VERSION QUALITY BUILD_TS BUILD_NO CHANNEL < <(node -e '
   const p = require(process.argv[1]);
   const ts = Date.parse(p.date || "") || Date.now();
-  console.log(p.commit, p.version, p.quality || "stable", ts, p.celiadorBuild || "-");
+  console.log(p.commit, p.version, p.quality || "stable", ts, p.celiadorBuild || "-", p.celiadorChannel || "prod");
 ' "$PRODUCT")
+# The channel (CHANNELS.md) decides which environment's daemon this build is
+# published to and whose manifest it is merged into: each environment's update
+# feed only ever offers its own channel's builds. Prod's dir moves to
+# envs/prod/daemon/releases at the prod cutover (daemon/ENVIRONMENTS.md).
+case "$CHANNEL" in
+  prod) CHANNEL_HOST=celiador.ai;      CHANNEL_DIR=daemon/releases ;;
+  test) CHANNEL_HOST=test.celiador.ai; CHANNEL_DIR=envs/test/daemon/releases ;;
+  dev)  CHANNEL_HOST=dev.celiador.ai;  CHANNEL_DIR=envs/dev/daemon/releases ;;
+  *) die "product.json names an unknown celiadorChannel \"$CHANNEL\"" ;;
+esac
+MANIFEST_URL="${MANIFEST_URL:-https://$CHANNEL_HOST/api/releases}"
+RELEASE_DIR="${RELEASE_DIR:-$CHANNEL_DIR}"
+log "Channel: $CHANNEL (quality $QUALITY → $MANIFEST_URL)"
 # Human-facing version for the feed/site: the VS Code version plus the build
 # number the gulp build stamped (commit count), since the version alone repeats
 # across releases. "-" means an app built before the build number existed.
@@ -121,7 +143,7 @@ echo "    out:      $OUT"
 
 # ── Stage a copy; never sign the build in place ─────────────────────────────
 STAGE="$OUT/stage"
-STAGE_APP="$STAGE/Celiador.app"
+STAGE_APP="$STAGE/$(basename "$APP")"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 # cp -R, not ditto: ditto preserves timestamps, and everything unpacked from the
@@ -229,7 +251,7 @@ ditto -c -k --sequesterRsrc --keepParent "$STAGE_APP" "$OUT/$NAME.zip"
 DMG_ROOT="$STAGE/dmg-root"
 rm -rf "$DMG_ROOT"
 mkdir -p "$DMG_ROOT"
-ditto "$STAGE_APP" "$DMG_ROOT/Celiador.app"
+ditto "$STAGE_APP" "$DMG_ROOT/$(basename "$APP")"
 ln -s /Applications "$DMG_ROOT/Applications"
 hdiutil create -volname "Celiador" -srcfolder "$DMG_ROOT" -ov -format ULFO -quiet "$OUT/$NAME.dmg"
 codesign --force --timestamp --sign "$IDENTITY" ${KC_ARGS[@]+"${KC_ARGS[@]}"} "$OUT/$NAME.dmg"

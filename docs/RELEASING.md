@@ -84,6 +84,18 @@ curl -sI https://celiador.ai/api/update/darwin-arm64/stable/<previous commit>   
 curl -sI https://celiador.ai/api/update/darwin-arm64/stable/<this commit>       # 204 → up to date
 ```
 
+## Channels
+
+The same pipeline cuts the test and dev channels (`CHANNELS.md`): run
+`build/celiador/channel.sh test` (or `dev`) before the gulp build, and the
+release script reads the channel from the packaged app's `product.json` and
+publishes to that environment's daemon (`~/envs/test/daemon/releases`,
+`https://test.celiador.ai/api/releases`) under quality `insider`. Each
+environment's update feed therefore only ever offers its own channel's builds.
+From Actions, pick the channel in *Release (macOS)* → *Run workflow*. Restore
+prod (`channel.sh prod`) before committing anything — the committed
+`product.json` is always prod.
+
 ## Verifying on a clean Mac
 
 The first-outside-tester check (editor#21): on a fresh macOS user account,
