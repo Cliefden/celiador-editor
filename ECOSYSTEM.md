@@ -2,7 +2,7 @@
 
 Celiador is one loop: **issue in, pull request out.** Label a GitHub issue `celiador` and an agent runs it in its own git worktree on your Mac, comments on the issue, and opens a pull request that closes it; you review and merge from your phone or from the editor's Agents view. The loop is the product. The editor in this repository is one runner for it (the nicest one), the Celiador Remote extension makes stock VS Code and Cursor another, and cloud runs are the third (in progress). The phone is the review surface; GitHub is where the run narrates itself.
 
-The pieces live in **independent repositories**, each with its own build and release cadence, bound by a shared auth + API contract against the daemon.
+The pieces live in **two repositories**: this one (the editor, on VS Code's version and release cadence) and `Cliefden/celiador` (the daemon, the iPhone app and the site, one release train — a `vX.Y.Z` tag there releases all three). They are bound by a shared auth + API contract against the daemon. Until 2026-10-29 the daemon, the app and the site were three repositories (`Cliefden/daemon`, `celiador-ios`, `celiador-web`); those names now redirect.
 
 > This file lives in the editor repository. The umbrella folder's `CLAUDE.md` carries the same map for agents working across repositories.
 
@@ -10,11 +10,11 @@ The pieces live in **independent repositories**, each with its own build and rel
 
 | Local folder | Repo | Role in the loop |
 |---|---|---|
-| `daemon` | `Cliefden/daemon` | **The hub.** Slim Hono server behind `celiador.ai/api/*`: GitHub App webhooks (labelled issues become queued tasks), the task queue and dispatch to runners, the agent-session relay (runner publishes, phone watches and steers), the Anthropic agent proxy (holds the key, enforces published per-user limits), Supabase JWT auth, APNs push, profile and chat history, and the editor's release feed. Cloud runs (in progress) run here too. |
+| `celiador/daemon` | `Cliefden/celiador` (`daemon/`) | **The hub.** Slim Hono server behind `celiador.ai/api/*`: GitHub App webhooks (labelled issues become queued tasks), the task queue and dispatch to runners, the agent-session relay (runner publishes, phone watches and steers), the Anthropic agent proxy (holds the key, enforces published per-user limits), Supabase JWT auth, APNs push, profile and chat history, and the editor's release feed. Cloud runs (in progress) run here too. `ENVIRONMENTS.md` and `RELEASING.md` at that repo's root cover dev / test / prod for everything but the editor. |
 | `celiador-editor` | `Cliefden/celiador-editor` | **A runner, and the cockpit.** Hard fork of `microsoft/vscode` with the `celiador-ai` extension built in: picks up queued tasks for the repositories it has open, runs the agent in a worktree, pushes and opens the pull request, and shows every run in the Agents view. This repository. |
 | `celiador-remote` | `Cliefden/celiador-remote` | **The same runner for stock VS Code and Cursor.** An ordinary extension (Open VSX `celiador.celiador-remote`) that ports the editor's relay client, auth and git review modules, so people keep their editor and still get the loop. |
-| `celiador-ios` | `Cliefden/celiador-ios` | **The review surface.** Celiador for iPhone: the queue (what needs you, what is running, what is ready), the agent's account of the change, the diff, follow-ups, approvals and questions, approve and merge. Push and Live Activity when a run needs you. |
-| `celiador-web` | `Cliefden/celiador-web` | **The site** at celiador.ai: the loop explained, the start guide, downloads and release listing, the published limits. |
+| `celiador/ios` | `Cliefden/celiador` (`ios/`) | **The review surface.** Celiador for iPhone: the queue (what needs you, what is running, what is ready), the agent's account of the change, the diff, follow-ups, approvals and questions, approve and merge. Push and Live Activity when a run needs you. Built by Xcode Cloud. |
+| `celiador/web` | `Cliefden/celiador` (`web/`) | **The site** at celiador.ai: the loop explained, the start guide, downloads and release listing, the published limits. |
 | `daemon-old` | `Cliefden/daemon-old` *(archived)* | The previous monorepo backend (spec/codegen engine, old native apps, studio UI). Reference only. |
 | `celiador-editor-legacy` | `Cliefden/celiador-editor-legacy` *(archived)* | The previous VSCodium build orchestrator. Reference only; the hard fork replaced it. |
 
