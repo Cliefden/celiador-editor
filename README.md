@@ -71,7 +71,7 @@ Kept intentionally small so upstream merges stay cheap. Beyond branding + the bu
 
 - **Open VSX** as the extension gallery, with signature verification relaxed so Open VSX extensions install.
 - **Issue reporter** points at this repo instead of `microsoft/vscode`.
-- **Onboarding walkthrough** disabled.
+- **Onboarding walkthrough** replaced by a Celiador one (sign in → bring settings from Cursor or VS Code → ask the agent → Agents window → theme), opened on first launch (`workbench.welcomePage.experimentalOnboarding` defaults to off here).
 
 Deferred (larger, done as focused follow-ups): removing the built-in Copilot subsystem, custom UI font, stripping residual Microsoft branding strings.
 
