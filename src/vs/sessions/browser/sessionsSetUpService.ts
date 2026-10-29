@@ -295,6 +295,14 @@ class SessionsSetUpWidget extends Disposable {
 	}
 
 	private _canInitializeWithoutGitHub(sessionTypes = this.sessionsManagementService.getAllProviderSessionTypes().map(({ sessionType }) => sessionType)): boolean {
+		// Celiador: the only agent signs in through the Celiador daemon, never GitHub,
+		// and its sign-in lives in the chat input ("Sign in to Celiador to use Claude").
+		// Forcing the GitHub dialog here — which the fork's `chat.triggerSetup` turns
+		// into a no-op — was a dead end on a fresh install, before the Claude session
+		// type had even registered. Upstream behaviour is kept for Code - OSS.
+		if (this.productService.nameShort !== 'Code - OSS') {
+			return true;
+		}
 		return sessionTypes.some(sessionType => sessionType.initializationOnSelection?.canInitializeWithoutGitHub === true);
 	}
 
@@ -512,7 +520,7 @@ class SessionsSetUpWidget extends Disposable {
 			try {
 				success = await this.commandService.executeCommand<boolean>('workbench.action.chat.triggerSetup', undefined, {
 					telemetrySource: 'sessionsSetup',
-					...createSessionsSignInDialogOptions(this.commandService, showReturnToVSCodeEditor, allowContinueWithoutSignIn, onContinueWithoutSignIn),
+					...createSessionsSignInDialogOptions(this.commandService, showReturnToVSCodeEditor, allowContinueWithoutSignIn, onContinueWithoutSignIn, this.productService.nameShort),
 					cancellationToken: setupCancellation.token,
 					onSignInStarted: (cancel: () => void) => {
 						signingInDialogRef.value = this.instantiationService.createInstance(SessionsSigningInDialog, () => {
@@ -589,6 +597,17 @@ class SessionsSetUpWidget extends Disposable {
 		const privacyUrl = defaultChatAgent?.privacyStatementUrl ?? '';
 		const publicCodeUrl = defaultChatAgent?.publicCodeMatchesUrl ?? '';
 		const settingsUrl = this.defaultAccountService.resolveGitHubUrl(GitHubPaths.copilotSettings);
+
+		// Celiador: no Copilot, no public-code matching — just our own terms and privacy.
+		if (this.productService.nameShort !== 'Code - OSS') {
+			const celiadorFooter = localize(
+				{ key: 'welcomeFooterCeliador', comment: ['{Locked="["}', '{Locked="]({1})"}', '{Locked="]({2})"}'] },
+				"By continuing, you agree to {0}'s [Terms]({1}) and [Privacy Statement]({2}).",
+				this.productService.nameShort, termsUrl, privacyUrl
+			);
+			element.appendChild($('p', undefined, disposables.add(this.markdownRendererService.render(new MarkdownString(celiadorFooter, { isTrusted: true }))).element));
+			return element;
+		}
 
 		const footer = settingsUrl ? localize(
 			{ key: 'welcomeFooter', comment: ['{Locked="["}', '{Locked="]({1})"}', '{Locked="]({2})"}', '{Locked="]({4})"}', '{Locked="]({5})"}'] },

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type Anthropic from '@anthropic-ai/sdk';
 import type * as http from 'http';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
@@ -14,7 +15,7 @@ import {
 	LoopbackProxyServer,
 	readProxyRequestBody,
 } from '../shared/loopbackProxyServer.js';
-import { writeJsonError } from './anthropicErrors.js';
+import { buildErrorEnvelope, writeJsonError } from './anthropicErrors.js';
 import { parseProxyBearer } from './claudeProxyAuth.js';
 
 // Celiador: the loopback proxy in front of the daemon's Anthropic gateway.
@@ -103,6 +104,49 @@ const DROPPED_HEADERS = new Set([
 
 function errorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * The daemon's refusals and the Anthropic error type the SDK should see for
+ * each. Newer daemons already send the Anthropic envelope; older ones answer
+ * `{ "error": "<sentence>" }`, which the SDK cannot classify.
+ */
+const REFUSAL_ERROR_TYPES = new Map<number, Anthropic.ErrorType>([
+	[401, 'authentication_error'],
+	[403, 'permission_error'],
+	[429, 'rate_limit_error'],
+	[503, 'overloaded_error'],
+]);
+
+/**
+ * Rewrites a daemon refusal body into the Anthropic error envelope when it is
+ * the older `{ error: "<sentence>" }` shape; anything else (an envelope already,
+ * or not JSON) is returned unchanged. Exported for tests.
+ */
+export function normalizeDaemonRefusal(status: number, body: string): string {
+	const type = REFUSAL_ERROR_TYPES.get(status);
+	if (!type) {
+		return body;
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(body);
+	} catch {
+		return body;
+	}
+	if (!parsed || typeof parsed !== 'object') {
+		return body;
+	}
+	const error = (parsed as { error?: unknown }).error;
+	if (typeof error !== 'string') {
+		return body;
+	}
+	return JSON.stringify(buildErrorEnvelope(type, error));
+}
+
+/** Whether a response is a daemon refusal whose (small, JSON) body may need {@link normalizeDaemonRefusal}. */
+function isRefusal(upstream: Response): boolean {
+	return REFUSAL_ERROR_TYPES.has(upstream.status) && (upstream.headers.get('content-type') ?? '').includes('application/json');
 }
 
 /**
@@ -226,6 +270,17 @@ export class CeliadorDaemonProxyService extends LoopbackProxyServer<ICeliadorDae
 					outHeaders[name] = value;
 				}
 			});
+			if (isRefusal(upstream)) {
+				// Plan / quota / sign-in refusals: make sure the SDK gets an Anthropic
+				// error envelope (so it classifies the failure and honours Retry-After)
+				// whatever the daemon's version.
+				const body = normalizeDaemonRefusal(upstream.status, await upstream.text());
+				if (!entry.clientGone) {
+					res.writeHead(upstream.status, outHeaders);
+					res.end(body);
+				}
+				return;
+			}
 			res.writeHead(upstream.status, outHeaders);
 			if (!upstream.body) {
 				res.end();

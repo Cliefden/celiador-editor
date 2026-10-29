@@ -10,6 +10,7 @@ import type { AgentSignal } from '../../common/agent.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import { createErrorResponsePart, ResponsePartKind, ToolResultContentType, type ToolResultContent, type ToolResultFileEditContent, type ToolResultTerminalContent } from '../../common/state/sessionState.js';
 import { extractForwardedErrorInfo } from '../shared/proxyChatError.js';
+import { describeDaemonRefusal } from './claudeDaemonRefusal.js';
 import { buildTopLevelSubagentReadyAction, emitInnerAssistantSignals, mapSubagentSystemMessage, SUBAGENT_SPAWNING_TOOL_NAMES, tagWithParent } from './claudeSubagentSignals.js';
 import type { SubagentRegistry } from './claudeSubagentRegistry.js';
 import { stripClientToolNamePrefix, hasClientToolNamePrefix } from './clientTools/claudeClientToolMcpServer.js';
@@ -530,6 +531,9 @@ function mapResult(
 	// messaging (rate limit, quota + upgrade affordance, etc.).
 	const errorText = getResultErrorText(message);
 	if (errorText !== undefined) {
+		// Celiador: a daemon refusal (plan, quota, sign-in) reads as the daemon's
+		// own sentence rather than the SDK's `API Error: 403 {…}` blob.
+		const daemonRefusal = describeDaemonRefusal(errorText);
 		signals.push({
 			kind: 'action',
 			resource: session,
@@ -540,6 +544,7 @@ function mapResult(
 				part: createErrorResponsePart({
 					errorType: message.subtype,
 					...extractForwardedErrorInfo(errorText),
+					...(daemonRefusal ? { message: daemonRefusal } : {}),
 				}),
 			},
 		});

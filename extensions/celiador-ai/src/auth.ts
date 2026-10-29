@@ -48,9 +48,16 @@ interface PkceState {
   expiresAt: number;
 }
 
+/** Which sign-in routes the server offers (`/api/config` → `signIn`); a missing flag means offered. */
+export interface SignInMethods {
+  password?: boolean;
+  magicLink?: boolean;
+  github?: boolean;
+}
+
 export class Auth {
   private cached: Session | null | undefined;
-  private supaConfig: { base: string; anonKey: string } | undefined;
+  private supaConfig: { base: string; anonKey: string; signIn?: SignInMethods } | undefined;
   private readonly onChange = new vscode.EventEmitter<void>();
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   /** Fires whenever the signed-in state changes (sign in/out/refresh). */
@@ -63,7 +70,7 @@ export class Auth {
   }
 
   /** Resolve the Supabase base URL + anon key (setting override → /api/config). */
-  private async supa(): Promise<{ base: string; anonKey: string }> {
+  private async supa(): Promise<{ base: string; anonKey: string; signIn?: SignInMethods }> {
     if (this.supaConfig) {return this.supaConfig;}
     const override = getRestrictedSetting<string>('supabaseUrl', '');
     let cfg: any = {};
@@ -74,8 +81,32 @@ export class Auth {
       /* fall back to daemon URL */
     }
     const base = (override || cfg.supabaseUrl || this.daemonUrl()).replace(/\/+$/, '');
-    this.supaConfig = { base, anonKey: cfg.supabaseAnonKey || '' };
+    this.supaConfig = { base, anonKey: cfg.supabaseAnonKey || '', signIn: cfg.signIn && typeof cfg.signIn === 'object' ? cfg.signIn : undefined };
     return this.supaConfig;
+  }
+
+  /**
+   * The sign-in routes this server actually offers, so the picker never shows a
+   * dead button (GitHub is off unless the environment has an OAuth app; magic
+   * links need mail). Prefers the daemon's `signIn` flags; an older daemon is
+   * asked through GoTrue's public settings. Unknown means offered.
+   */
+  async signInMethods(): Promise<{ password: boolean; magicLink: boolean; github: boolean }> {
+    const { base, anonKey, signIn } = await this.supa();
+    if (signIn) {
+      return { password: signIn.password !== false, magicLink: signIn.magicLink !== false, github: signIn.github !== false };
+    }
+    try {
+      const res = await fetch(`${base}/auth/v1/settings`, { headers: { apikey: anonKey, Accept: 'application/json' } });
+      if (res.ok) {
+        const settings: any = await res.json();
+        const email = settings?.external?.email !== false;
+        return { password: email, magicLink: email, github: settings?.external?.github === true };
+      }
+    } catch {
+      /* unreachable → offer everything, as before */
+    }
+    return { password: true, magicLink: true, github: true };
   }
 
   private async gotrue(pathAndQuery: string, body: unknown): Promise<any> {
