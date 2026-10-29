@@ -32,8 +32,11 @@ app**, not just the dev build; each phase ships independently.
   `trustedExtensionAuthAccess` entry; Cliefden company/copyright in the app bundle;
   agent UI strings (approvals hover, Local/Claude session descriptions, SDK setup banner
   → "Sign in to Celiador", model-picker update hints); no post-update fetch from
-  code.visualstudio.com; no "Ask @vscode". Already off: Settings Sync, telemetry,
-  experiments. Kept by decision: the bundled GitHub Pull Requests extension.
+  code.visualstudio.com; no "Ask @vscode". Already off: Settings Sync, the Microsoft
+  telemetry endpoints, experiments. (Telemetry itself is ON — `product.json`
+  `enableTelemetry: true` — and goes to TelemetryDeck under the event allowlist in
+  `telemetryDeckAppender.ts`; it is not Microsoft's.) Kept by decision: the bundled
+  GitHub Pull Requests extension.
 - **Done, second batch:** blanked the Copilot network endpoints in `defaultChatAgent`
   (every caller skips an empty URL); dropped the `tunnel-forwarding` built-in (no tunnel
   CLI is shipped, so it could only fail); Copilot setup/plan/settings commands hidden

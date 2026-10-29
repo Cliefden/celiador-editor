@@ -156,7 +156,7 @@
           "id": "celiador.welcome",
           "name": "Account",
           "type": "webview",
-          "visibility": "collapsed"
+          "visibility": "visible"
         },
         {
           "id": "celiador.changes",

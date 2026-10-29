@@ -6,12 +6,14 @@
 // --- Start Celiador ---
 // Celiador: "Import Settings from Another Editor" — bring settings, keybindings,
 // snippets and extensions over from Cursor or VS Code, so switching takes a
-// minute. Available from the command palette; it is not offered unprompted on
-// startup (that notification was dropped in the stand-out round — the first
-// run should be quiet).
+// minute. Available from the command palette, and as a step of the "Get started
+// with Celiador" walkthrough when another editor is found on this machine
+// (`celiador.importSourcesAvailable`). It is never a startup notification (that
+// was dropped in the stand-out round — the first run should be quiet).
 
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
 import { parse } from '../../../../base/common/json.js';
 import { applyEdits, setProperty } from '../../../../base/common/jsonEdit.js';
 import { FormattingOptions } from '../../../../base/common/jsonFormatter.js';
@@ -20,6 +22,7 @@ import { joinPath } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { IExtensionGalleryService } from '../../../../platform/extensionManagement/common/extensionManagement.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
@@ -29,9 +32,16 @@ import { INotificationService, Severity } from '../../../../platform/notificatio
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
 import { IWorkbenchExtensionManagementService } from '../../../services/extensionManagement/common/extensionManagement.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
+import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { IImportSource, IKeybindingRule, IMPORT_SOURCES, extensionIdsToImport, keybindingsToImport, settingsToImport, sourceExtensionsManifest, sourceUserDir } from '../common/celiadorImport.js';
 
 const FORMATTING: FormattingOptions = { tabSize: 4, insertSpaces: false, eol: '\n' };
+
+/**
+ * True when another VS Code-family editor has user data on this machine. The
+ * "Get started with Celiador" walkthrough shows its import step on this key.
+ */
+export const CeliadorImportSourcesAvailableContext = new RawContextKey<boolean>('celiador.importSourcesAvailable', false, localize('celiadorImport.sourcesAvailable', "Whether Cursor or VS Code settings were found on this machine to import into Celiador."));
 
 interface IImportReport {
 	settings: number;
@@ -218,4 +228,32 @@ class ImportFromOtherEditorAction extends Action2 {
 }
 
 registerAction2(ImportFromOtherEditorAction);
+
+/**
+ * Sets `celiador.importSourcesAvailable` once per window, off the startup path.
+ * A file-existence probe per known editor; nothing is read or imported here.
+ */
+class CeliadorImportSourcesContribution extends Disposable implements IWorkbenchContribution {
+	static readonly ID = 'workbench.contrib.celiadorImportSources';
+
+	constructor(
+		@IFileService fileService: IFileService,
+		@INativeEnvironmentService environmentService: INativeEnvironmentService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@ILogService logService: ILogService,
+	) {
+		super();
+		const available = CeliadorImportSourcesAvailableContext.bindTo(contextKeyService);
+		detectSources(fileService, environmentService.userHome).then(
+			sources => {
+				if (!this._store.isDisposed) {
+					available.set(sources.length > 0);
+				}
+			},
+			e => logService.warn('[celiadorImport] could not probe for other editors', e)
+		);
+	}
+}
+
+registerWorkbenchContribution2(CeliadorImportSourcesContribution.ID, CeliadorImportSourcesContribution, WorkbenchPhase.Eventually);
 // --- End Celiador ---

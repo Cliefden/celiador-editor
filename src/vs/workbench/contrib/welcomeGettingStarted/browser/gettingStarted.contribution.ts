@@ -343,7 +343,10 @@ configurationRegistry.registerConfiguration({
 		'workbench.welcomePage.experimentalOnboarding': {
 			scope: ConfigurationScope.APPLICATION,
 			type: 'boolean',
-			default: true,
+			// Celiador: off, so a fresh install opens straight into the "Get started
+			// with Celiador" walkthrough (sign in → import → ask the agent) instead
+			// of the bare Welcome page. Upstream defaults this to true.
+			default: false,
 			tags: ['experimental'],
 			description: localize('workbench.welcomePage.experimentalOnboarding', "When enabled, show the new onboarding experience instead of the classic walkthrough on first launch."),
 			experiment: {

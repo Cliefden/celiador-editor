@@ -6,6 +6,11 @@
 import themePickerContent from './media/theme_picker.js';
 import themePickerSmallContent from './media/theme_picker_small.js';
 import notebookProfileContent from './media/notebookProfile.js';
+// Celiador: the media panes of the Celiador walkthrough steps.
+import celiadorSignInContent from './media/celiador_sign_in.js';
+import celiadorImportContent from './media/celiador_import.js';
+import celiadorAskAgentContent from './media/celiador_ask_agent.js';
+import celiadorAgentsWindowContent from './media/celiador_agents_window.js';
 import { localize } from '../../../../nls.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -65,6 +70,11 @@ gettingStartedContentRegistry.registerProvider('vs/workbench/contrib/welcomeGett
 gettingStartedContentRegistry.registerProvider('vs/workbench/contrib/welcomeGettingStarted/common/media/notebookProfile', notebookProfileContent);
 // Register empty media for accessibility walkthrough
 gettingStartedContentRegistry.registerProvider('vs/workbench/contrib/welcomeGettingStarted/common/media/empty', () => '');
+// Celiador: media of the Celiador walkthrough steps.
+gettingStartedContentRegistry.registerProvider('vs/workbench/contrib/welcomeGettingStarted/common/media/celiador_sign_in', celiadorSignInContent);
+gettingStartedContentRegistry.registerProvider('vs/workbench/contrib/welcomeGettingStarted/common/media/celiador_import', celiadorImportContent);
+gettingStartedContentRegistry.registerProvider('vs/workbench/contrib/welcomeGettingStarted/common/media/celiador_ask_agent', celiadorAskAgentContent);
+gettingStartedContentRegistry.registerProvider('vs/workbench/contrib/welcomeGettingStarted/common/media/celiador_agents_window', celiadorAgentsWindowContent);
 
 const setupIcon = registerIcon('getting-started-setup', Codicon.zap, localize('getting-started-setup-icon', "Icon used for the setup category of welcome page"));
 const beginnerIcon = registerIcon('getting-started-beginner', Codicon.lightbulb, localize('getting-started-beginner-icon', "Icon used for the beginner category of welcome page"));
@@ -224,7 +234,10 @@ const Button = (title: string, href: string) => `[${title}](${href})`;
 
 // Celiador: sign-in-first onboarding. `celiador.signedIn` is set by the celiador-ai
 // extension's auth provider; `celiador.signIn` is its sign-in command.
+// `celiador.importSourcesAvailable` is set by the celiadorImport contribution when
+// Cursor or VS Code has user data on this machine.
 const CeliadorSignedInContext = 'celiador.signedIn';
+const CeliadorImportSourcesAvailableContext = 'celiador.importSourcesAvailable';
 
 export const walkthroughs: GettingStartedWalkthroughContent = [
 	{
@@ -245,21 +258,29 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
 					description: localize('gettingStarted.celiadorSignIn.description.interpolated', "Your Celiador account powers the agent. There are no API keys to set up, and your plan's included usage applies.\n{0}", Button(localize('gettingStarted.celiadorSignIn.button', "Sign In to Celiador"), 'command:celiador.signIn')),
 					when: `!${CeliadorSignedInContext}`,
 					completionEvents: [`onContext:${CeliadorSignedInContext}`],
-					media: { type: 'markdown', path: 'empty' }
+					media: { type: 'markdown', path: 'celiador_sign_in' }
+				},
+				{
+					id: 'celiadorImport',
+					title: localize('gettingStarted.celiadorImport.title', "Bring your settings from Cursor or VS Code"),
+					description: localize('gettingStarted.celiadorImport.description.interpolated', "Another editor is set up on this Mac. Carry its settings, keybindings, snippets and extensions over in one go, so Celiador feels like home from the first minute.\n{0}", Button(localize('gettingStarted.celiadorImport.button', "Import Settings"), 'command:celiador.importFromOtherEditor')),
+					when: CeliadorImportSourcesAvailableContext,
+					completionEvents: ['onCommand:celiador.importFromOtherEditor'],
+					media: { type: 'markdown', path: 'celiador_import' }
 				},
 				{
 					id: 'celiadorAskAgent',
 					title: localize('gettingStarted.celiadorAskAgent.title', "Ask the agent"),
 					description: localize('gettingStarted.celiadorAskAgent.description.interpolated', "Describe what you want in plain words. The agent reads and edits the files in your workspace, and you review every change before it lands.\n{0}", Button(localize('gettingStarted.celiadorAskAgent.button', "Open Chat"), 'command:workbench.action.chat.open')),
 					completionEvents: ['onCommand:workbench.action.chat.open'],
-					media: { type: 'markdown', path: 'empty' }
+					media: { type: 'markdown', path: 'celiador_ask_agent' }
 				},
 				{
 					id: 'celiadorAgentsWindow',
 					title: localize('gettingStarted.celiadorAgentsWindow.title', "Run agents side by side"),
 					description: localize('gettingStarted.celiadorAgentsWindow.description.interpolated', "The Agents window runs several agent sessions in parallel and lets you follow and steer them, including from the Celiador iPhone app.\n{0}", Button(localize('gettingStarted.celiadorAgentsWindow.button', "Open Agents Window"), 'command:workbench.action.openWorkspaceInAgentsWindow')),
 					completionEvents: ['onCommand:workbench.action.openWorkspaceInAgentsWindow'],
-					media: { type: 'markdown', path: 'empty' }
+					media: { type: 'markdown', path: 'celiador_agents_window' }
 				},
 				{
 					id: 'pickColorTheme',
