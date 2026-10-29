@@ -35,6 +35,7 @@ import { IFolderToOpen, IOpenedMainWindow } from '../../../platform/window/commo
 import { ILabelService, Verbosity } from '../../../platform/label/common/label.js';
 import { OPEN_VSCODE_WINDOW_COMMAND_ID, RETURN_TO_VSCODE_EDITOR_COMMAND_ID, SHOULD_SHOW_RETURN_TO_VSCODE_EDITOR_COMMAND_ID } from '../../common/sessionCommands.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
+import product from '../../../platform/product/common/product.js';
 
 export class OpenSessionInVSCodeAction extends Action2 {
 	static readonly ID = 'agents.openSessionInVSCode';
@@ -136,7 +137,10 @@ export class ReturnToVSCodeEditorAction extends Action2 {
 	constructor() {
 		super({
 			id: RETURN_TO_VSCODE_EDITOR_COMMAND_ID,
-			title: localize2('returnToVSCodeEditor', 'Return to VS Code Editor'),
+			// Celiador: name the product, not VS Code.
+			title: product.nameShort !== 'Code - OSS'
+				? localize2('returnToEditor', 'Return to {0} Editor', product.nameShort)
+				: localize2('returnToVSCodeEditor', 'Return to VS Code Editor'),
 		});
 	}
 

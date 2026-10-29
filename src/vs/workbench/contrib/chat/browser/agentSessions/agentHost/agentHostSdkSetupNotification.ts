@@ -13,6 +13,7 @@ import type { AgentSdkDownloadStatus, IAgentSdkSetupInfo } from '../../../../../
 import type { RootState } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { CommandsRegistry } from '../../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
+import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IDefaultAccountService } from '../../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { ServicesAccessor } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
@@ -173,6 +174,9 @@ const AGENT_SDK_SETUP_NOTIFICATION_ID_PREFIX = 'agentHost.sdkSetup.';
 
 /** Celiador: the celiador-ai extension's sign-in command. */
 const CELIADOR_SIGN_IN_COMMAND_ID = 'celiador.signIn';
+/** Set by the celiador-ai auth provider; the Celiador account is the agent's account. */
+const CELIADOR_SIGNED_IN_CONTEXT_KEY = 'celiador.signedIn';
+const CELIADOR_SIGNED_IN_CONTEXT_KEYS = new Set([CELIADOR_SIGNED_IN_CONTEXT_KEY]);
 
 export function agentSdkSetupNotificationId(agent: string): string {
 	return `${AGENT_SDK_SETUP_NOTIFICATION_ID_PREFIX}${agent}`;
@@ -320,6 +324,7 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 		@IAgentHostService private readonly _agentHostService: IAgentHostService,
 		@ICodexAccountService private readonly _codexAccountService: ICodexAccountService,
 		@IProductService private readonly _productService: IProductService,
+		@IContextKeyService private readonly _contextKeyService: IContextKeyService,
 	) {
 		super();
 		this._register(Event.any(
@@ -329,6 +334,8 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 			this._languageModelsService.onDidChangeLanguageModels,
 			this._codexAccountService.onDidChangeAccount,
 			Event.filter(this._configurationService.onDidChangeConfiguration, event => event.affectsConfiguration(AgentHostAllowSignedOutWhenUsableSettingId)),
+			// Celiador: the account that matters here is the Celiador one.
+			Event.filter(this._contextKeyService.onDidChangeContext, event => event.affectsSome(CELIADOR_SIGNED_IN_CONTEXT_KEYS)),
 		)(() => this._update()));
 		// The host restarts (and a remote reconnects) behind a fresh root state, so
 		// re-bind rather than holding one subscription for the window's lifetime.
@@ -343,10 +350,17 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 	}
 
 	private _update(): void {
-		const allowSignedOutWhenUsable = this._configurationService.getValue<boolean>(AgentHostAllowSignedOutWhenUsableSettingId) === true;
+		// Celiador: there is no Copilot entitlement to wait for and no GitHub account to
+		// require. "Signed in" means signed in to Celiador (`celiador.signedIn`, set by
+		// the celiador-ai auth provider); signed out, the banner must still render — it
+		// is the sign-in route — so the signed-out opt-in is treated as on.
+		const isCeliador = this._productService.nameShort !== 'Code - OSS';
+		const celiadorSignedIn = isCeliador && this._contextKeyService.getContextKeyValue<boolean>(CELIADOR_SIGNED_IN_CONTEXT_KEY) === true;
+		const allowSignedOutWhenUsable = isCeliador || this._configurationService.getValue<boolean>(AgentHostAllowSignedOutWhenUsableSettingId) === true;
 		const entitlement = this._chatEntitlementService.entitlement;
-		const entitlementResolved = entitlement !== ChatEntitlement.Unresolved;
-		const signedIn = this._defaultAccountService.currentDefaultAccount !== null
+		const entitlementResolved = isCeliador || entitlement !== ChatEntitlement.Unresolved;
+		const signedIn = celiadorSignedIn
+			|| this._defaultAccountService.currentDefaultAccount !== null
 			|| (entitlementResolved && entitlement !== ChatEntitlement.Unknown);
 		const displayNames = getAgentDisplayNames(this._agentHostService.rootState.value);
 		const stale = new Set(this._shown.keys());

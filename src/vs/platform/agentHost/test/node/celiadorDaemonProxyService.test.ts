@@ -8,7 +8,7 @@ import type * as http from 'http';
 import { AddressInfo } from 'net';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { CeliadorDaemonProxyService } from '../../node/claude/celiadorDaemonProxyService.js';
+import { CeliadorDaemonProxyService, normalizeDaemonRefusal } from '../../node/claude/celiadorDaemonProxyService.js';
 
 // Celiador: the daemon proxy must present the agent's *current* token to the
 // daemon on every request, so a token refresh reaches a running turn.
@@ -160,5 +160,43 @@ suite('CeliadorDaemonProxyService', () => {
 		gateway.dispose();
 		const res = await post(handle, '/v1/messages', '{}');
 		assert.deepStrictEqual({ status: res.status, type: JSON.parse(res.body).error.type }, { status: 502, type: 'api_error' });
+	});
+
+	// Celiador: plan / quota / sign-in refusals reach the SDK as Anthropic error envelopes.
+	test('rewrites an older daemon\'s `{error}` refusal into an Anthropic envelope, keeping Retry-After', async () => {
+		const { gateway, handle } = await setup();
+		gateway.status = 429;
+		gateway.responseBody = '{"error":"Daily request limit reached."}';
+		const res = await fetch(`${handle.baseUrl}/v1/messages`, {
+			method: 'POST',
+			headers: { 'authorization': `Bearer ${handle.nonce}.session-1`, 'content-type': 'application/json' },
+			body: '{}',
+		});
+		assert.deepStrictEqual({ status: res.status, body: JSON.parse(await res.text()) }, {
+			status: 429,
+			body: { type: 'error', error: { type: 'rate_limit_error', message: 'Daily request limit reached.' }, request_id: null },
+		});
+	});
+
+	test('relays a refusal that already is an Anthropic envelope unchanged', async () => {
+		const { gateway, handle } = await setup();
+		gateway.status = 403;
+		gateway.responseBody = '{"type":"error","error":{"type":"permission_error","message":"Your plan doesn\'t include the Celiador agent."},"request_id":null}';
+		const res = await post(handle, '/v1/messages', '{}');
+		assert.deepStrictEqual(res, { status: 403, body: gateway.responseBody });
+	});
+
+	test('normalizeDaemonRefusal touches only `{error: string}` bodies of refusal statuses', () => {
+		assert.deepStrictEqual({
+			legacy: normalizeDaemonRefusal(403, '{"error":"No."}'),
+			envelope: normalizeDaemonRefusal(403, '{"type":"error","error":{"type":"permission_error","message":"No."}}'),
+			otherStatus: normalizeDaemonRefusal(500, '{"error":"boom"}'),
+			notJson: normalizeDaemonRefusal(429, 'Too Many Requests'),
+		}, {
+			legacy: '{"type":"error","error":{"type":"permission_error","message":"No."},"request_id":null}',
+			envelope: '{"type":"error","error":{"type":"permission_error","message":"No."}}',
+			otherStatus: '{"error":"boom"}',
+			notJson: 'Too Many Requests',
+		});
 	});
 });

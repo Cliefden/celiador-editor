@@ -125,12 +125,15 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('celiador.signIn', async () => {
       if (!auth) {return;}
+      // Only the routes this server offers: a GitHub or magic-link entry that
+      // can't complete is a dead end for a first-time user.
+      const methods = await auth.signInMethods();
       const pick = await vscode.window.showQuickPick(
         [
           { label: 'Sign in — email & password', id: 'password' },
           { label: 'Create account — email & password', id: 'signup' },
-          { label: 'Magic link (email)', id: 'magic' },
-          { label: 'GitHub', id: 'github' },
+          ...(methods.magicLink ? [{ label: 'Magic link (email)', id: 'magic' }] : []),
+          ...(methods.github ? [{ label: 'GitHub', id: 'github' }] : []),
         ],
         { placeHolder: 'Sign in to Celiador' }
       );

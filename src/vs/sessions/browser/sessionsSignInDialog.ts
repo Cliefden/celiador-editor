@@ -22,6 +22,8 @@ export function createSessionsSignInDialogOptions(
 	showReturnToVSCodeEditor: boolean,
 	allowContinueWithoutSignIn = false,
 	onContinueWithoutSignIn: () => void = () => { },
+	// Celiador: the product's short name, so a fork's dialog does not say "VS Code".
+	editorName = 'VS Code',
 ) {
 	return {
 		forceSignInDialog: true,
@@ -33,7 +35,7 @@ export function createSessionsSignInDialogOptions(
 		allowContinueWithoutSignIn,
 		renderDialogFooter: showReturnToVSCodeEditor ? (footer: HTMLElement) => createDialogAction(
 			footer,
-			localize('sessions.returnToVSCodeEditor', "Return to VS Code Editor"),
+			localize('sessions.returnToEditor', "Return to {0} Editor", editorName),
 			() => {
 				void commandService.executeCommand<void>(RETURN_TO_VSCODE_EDITOR_COMMAND_ID).catch(onUnexpectedError);
 			}
