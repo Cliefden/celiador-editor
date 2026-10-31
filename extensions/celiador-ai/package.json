@@ -53,6 +53,11 @@
         "category": "Celiador"
       },
       {
+        "command": "celiador.showEnvironment",
+        "title": "Celiador: Show Environment",
+        "category": "Celiador"
+      },
+      {
         "command": "celiador.signIn",
         "title": "Celiador: Sign In",
         "category": "Celiador"
@@ -205,7 +210,7 @@
     "vscode:prepublish": "npm run compile",
     "pretest": "npm run compile",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "npm run compile && node --test ./out/test/unit/"
+    "test:unit": "npm run compile && node --test out/test/unit/*.test.js"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",

@@ -19,6 +19,22 @@ const FALLBACK_URL_PROTOCOL = 'celiador';
 interface ProductChannelFields {
 	celiadorDaemonUrl?: string;
 	urlProtocol?: string;
+	celiadorChannel?: string;
+	celiadorBuild?: number;
+	nameLong?: string;
+	version?: string;
+	commit?: string;
+}
+
+/** The build's identity for the environment status item (environmentStatus.ts). */
+export interface ProductIdentity {
+	channel?: string;
+	name?: string;
+	version?: string;
+	commit?: string;
+	build?: number;
+	/** The build's own daemon URL — what the native agent host and relay use, setting or not. */
+	daemonUrl: string;
 }
 
 let productCache: ProductChannelFields | null | undefined;
@@ -45,6 +61,19 @@ export function resolveDaemonUrl(): string {
   const setting = getRestrictedSetting<string>('daemonUrl', '');
   const url = setting || product().celiadorDaemonUrl || FALLBACK_DAEMON_URL;
   return url.replace(/\/+$/, '');
+}
+
+/** Channel, name, version, commit and build number of this build, straight from product.json. */
+export function productIdentity(): ProductIdentity {
+  const p = product();
+  return {
+    channel: p.celiadorChannel,
+    name: p.nameLong ?? vscode.env.appName,
+    version: p.version ?? vscode.version,
+    commit: p.commit,
+    build: p.celiadorBuild,
+    daemonUrl: (p.celiadorDaemonUrl || FALLBACK_DAEMON_URL).replace(/\/+$/, ''),
+  };
 }
 
 /**

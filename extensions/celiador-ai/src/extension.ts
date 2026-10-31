@@ -11,6 +11,7 @@ import { CeliadorWelcomeViewProvider } from './welcomeView';
 import { DaemonApi, type Me } from './api';
 import { registerGitReview, registerTaskCommands } from './gitReview';
 import { registerInlineCompletions } from './inlineCompletionsProvider';
+import { registerEnvironmentStatus } from './environmentStatus';
 import { resolveDaemonUrl } from './productConfig';
 
 // The agent itself is the native Agents Window (Claude Agent SDK), routed through the
@@ -74,6 +75,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // App data (profile + chat history + account summary) served by the daemon over the shared JWT.
   const api = new DaemonApi(auth, () => daemonUrl());
+
+  // Which environment this window works against — first status bar slot, amber off prod.
+  registerEnvironmentStatus(context);
 
   // Welcome/account pane — always visible so the signed-out state invites sign-in
   // (the Agents Window needs a Celiador token) instead of silently waiting; signed

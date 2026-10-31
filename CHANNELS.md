@@ -51,4 +51,12 @@ app's `celiador://*`) on test, `celiador://*` on prod.
 
 Individual developers don't need a separate build — set
 `"celiador.daemonUrl": "http://localhost:4661"` in settings to point any channel at a
-local daemon.
+local daemon. Note that the setting redirects only the extension (sign-in, account,
+chats); the native agent host, relay bridge and presence keep the build's
+`celiadorDaemonUrl`.
+
+## Seeing where you are
+
+The first status bar item (`extensions/celiador-ai/src/environmentStatus.ts`) names the environment this window works against: `prod` plain, `TEST` / `DEV` / `LOCAL` on the amber warning background, and the red error background when the client is split — the `celiador.daemonUrl` setting points the extension somewhere other than the build's daemon, the daemon reports a different `env` than its host name implies, or a build's channel and its daemon URL disagree. The environment comes from the daemon's own `GET /api/health` (`env`, `version`, `commit`); until it answers, the host name stands in. The tooltip lists build (name, version, build number, commit, channel) and daemon; the item's quick pick (also **Celiador: Show Environment**) copies that as one line for an issue, opens the daemon, or opens the setting. `describeEnvironment()` in `environment.ts` is pure and covered by `src/test/unit/environment.test.ts`.
+
+The channel builds also carry their name in the title bar (`nameLong`: "Celiador Dev", "Celiador Test") and the banner on the dock icon; the status item is what still tells the truth after a `celiador.daemonUrl` override.
