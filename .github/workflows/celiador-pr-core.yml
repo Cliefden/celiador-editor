@@ -1,0 +1,130 @@
+name: Celiador PR (core)
+
+# Checks for editor core changes on hosted Ubuntu: eslint on the changed files,
+# typecheck-client, build-fast --client-only, the agentHost node unit tests and
+# the agentHost browser unit tests (Chromium).
+# Path-filtered so docs-only or extension-only PRs don't pay for a root install.
+# node_modules is cached under its own key (no glibc sysroot, unlike the Linux
+# release build); the cache is saved from main so pull requests can restore it.
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'build/**'
+      - 'test/unit/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.nvmrc'
+      - '.npmrc'
+      - '.github/workflows/celiador-pr-core.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'build/**'
+      - 'test/unit/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.nvmrc'
+      - '.npmrc'
+      - '.github/workflows/celiador-pr-core.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  core:
+    name: Core lint, typecheck and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # HEAD^1 is the base: the PR merge commit's first parent, or the previous main commit.
+          fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install system dependencies
+        run: |
+          set -e
+          ./build/azure-pipelines/linux/apt-retry.sh sudo apt-get update
+          ./build/azure-pipelines/linux/apt-retry.sh sudo apt-get install -y \
+            pkg-config libxkbfile-dev libkrb5-dev libsecret-1-dev
+
+      - name: Restore node_modules cache
+        id: cache-node-modules
+        uses: ./.github/actions/restore-node-modules
+        with:
+          key-prefix: celiador-node_modules-pr-linux
+          key-args: "linux x64 $(node -p process.arch)"
+
+      - name: Install build dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        working-directory: build
+        run: |
+          set -e
+          for i in {1..5}; do
+            npm ci && break
+            if [ "$i" -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
+            echo "npm ci failed $i, trying again..."
+          done
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          for i in {1..5}; do
+            npm ci && break
+            if [ "$i" -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
+            echo "npm ci failed $i, trying again..."
+          done
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+      - name: Save node_modules cache
+        if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event_name == 'push'
+        uses: ./.github/actions/save-node-modules
+
+      - name: Electron typings
+        # postinstall downloads these; a cache hit skips postinstall. Idempotent and checksummed.
+        run: node build/npm/electronTypes.ts
+
+      - name: ESLint changed files
+        run: |
+          set -e
+          mapfile -t files < <(git diff --name-only --diff-filter=ACMR HEAD^1 HEAD -- '*.ts' '*.js' '*.mjs' '*.mts' | grep -v -E '^(extensions/copilot|test/monaco|test/smoke)/' || true)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No changed TypeScript/JavaScript files."
+            exit 0
+          fi
+          printf '%s\n' "${files[@]}"
+          npm run eslint -- "${files[@]}"
+
+      - name: Typecheck client
+        run: npm run typecheck-client
+
+      - name: Build client
+        run: npm run build-fast -- --client-only
+
+      - name: agentHost node unit tests
+        run: npm run test-node -- --runGlob "vs/platform/agentHost/test/{common,node}/**/*.test.js"
+
+      - name: Install Chromium for browser tests
+        run: npx playwright install --with-deps chromium
+
+      - name: agentHost browser unit tests
+        run: node test/unit/browser/index.js --browser chromium --runGlob "vs/workbench/contrib/chat/test/browser/agentSessions/agentHost/*.test.js"
