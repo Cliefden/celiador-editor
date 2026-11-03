@@ -100,7 +100,11 @@ export async function runBuildFast(repoRoot: string, force: boolean, clientOnly 
 		}
 
 		const outputs = await getOutputStatus(repoRoot);
-		const plan = createBuildPlan(saved, environment, changes, outputs, force, clientOnly);
+		let plan = createBuildPlan(saved, environment, changes, outputs, force, clientOnly);
+		// Celiador: the fork removed extensions/copilot, so its lane never builds.
+		if (!hasCopilotExtension(repoRoot)) {
+			plan = { ...plan, copilot: 'skip' };
+		}
 		logPlan(plan);
 
 		const hasBuildWork = plan.client !== 'skip' || plan.extensions !== 'skip' || plan.copilot !== 'skip';
@@ -417,7 +421,8 @@ async function runAllFull(repoRoot: string, clientOnly: boolean): Promise<void> 
 		runCommand(repoRoot, process.execPath, [path.join(repoRoot, 'build', 'next', 'index.ts'), 'transpile'], 'client'),
 		...(!clientOnly ? [
 			runCommand(repoRoot, npmCommand(), EXTENSION_BUILD_ARGS, 'extensions'),
-			runCommand(repoRoot, npmCommand(), COPILOT_BUILD_ARGS, 'copilot'),
+			// Celiador: skip the Copilot lane when the extension is not in the tree.
+			...(hasCopilotExtension(repoRoot) ? [runCommand(repoRoot, npmCommand(), COPILOT_BUILD_ARGS, 'copilot')] : []),
 		] : []),
 	]);
 }
@@ -456,17 +461,22 @@ function logPlan(plan: BuildFastPlan): void {
 	console.log(`[build-fast] client=${plan.client}, extensions=${plan.extensions}, copilot=${plan.copilot}`);
 }
 
+/** Celiador: the fork removed extensions/copilot; build-fast must not assume it exists. */
+function hasCopilotExtension(repoRoot: string): boolean {
+	return fs.existsSync(path.join(repoRoot, 'extensions', 'copilot', 'package.json'));
+}
+
 function readEnvironment(repoRoot: string): string {
-	const copilotPackage = JSON.parse(fs.readFileSync(path.join(repoRoot, 'extensions', 'copilot', 'package.json'), 'utf8')) as {
+	const copilotPackage = hasCopilotExtension(repoRoot) ? JSON.parse(fs.readFileSync(path.join(repoRoot, 'extensions', 'copilot', 'package.json'), 'utf8')) as {
 		readonly devDependencies?: Readonly<Record<string, string>>;
-	};
+	} : undefined;
 	return [
 		`recipe=${BUILD_RECIPE}`,
 		`platform=${process.platform}`,
 		`arch=${process.arch}`,
 		`node=${process.version}`,
 		`esbuild=${esbuild.version}`,
-		`copilot-esbuild=${copilotPackage.devDependencies?.esbuild ?? ''}`,
+		`copilot-esbuild=${copilotPackage?.devDependencies?.esbuild ?? ''}`,
 	].join(';');
 }
 
