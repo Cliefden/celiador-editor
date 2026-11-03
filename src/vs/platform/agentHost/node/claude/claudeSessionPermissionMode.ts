@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { URI } from '../../../../base/common/uri.js';
-import { type ClaudePermissionMode, ClaudeSessionConfigKey, narrowClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
+import { type ClaudePermissionMode, type ClaudeProjectSettings, ClaudeSessionConfigKey, narrowClaudePermissionMode, narrowClaudeProjectSettings } from '../../common/claudeSessionConfigKeys.js';
 import type { IAgentChatConfigurationTarget, IAgentConfigurationService } from '../agentConfigurationService.js';
 
 /**
@@ -27,6 +27,21 @@ export function readClaudePermissionMode(
 ): ClaudePermissionMode | undefined {
 	return narrowClaudePermissionMode(
 		configurationService.getChatConfigValues(claudeConfigTarget(ownerSession, chat))?.[ClaudeSessionConfigKey.PermissionMode],
+	);
+}
+
+/**
+ * Celiador: read whether a chat's session loads the repository's own
+ * `.claude` settings. `undefined` when the schema hasn't been registered yet;
+ * callers treat that as `'load'` (the upstream behaviour).
+ */
+export function readClaudeProjectSettings(
+	configurationService: IAgentConfigurationService,
+	ownerSession: URI,
+	chat: URI,
+): ClaudeProjectSettings | undefined {
+	return narrowClaudeProjectSettings(
+		configurationService.getChatConfigValues(claudeConfigTarget(ownerSession, chat))?.[ClaudeSessionConfigKey.ProjectSettings],
 	);
 }
 

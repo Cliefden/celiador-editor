@@ -37,7 +37,9 @@ import { isLocation, type Location } from '../../../../../../editor/common/langu
 import type { ITextModel } from '../../../../../../editor/common/model.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { localize } from '../../../../../../nls.js';
-import { AgentHostAllowSignedOutWhenUsableSettingId, AgentHostMcpToolRoutingEnabledSettingId, AgentProvider, AgentSession, CODEX_AGENT_PROVIDER_ID, COPILOT_CLI_AGENT_PROVIDER_ID, type IAgentConnection } from '../../../../../../platform/agentHost/common/agentService.js';
+import { AgentHostAllowSignedOutWhenUsableSettingId, AgentHostMcpToolRoutingEnabledSettingId, AgentProvider, AgentSession, CLAUDE_AGENT_PROVIDER_ID, CODEX_AGENT_PROVIDER_ID, COPILOT_CLI_AGENT_PROVIDER_ID, type IAgentConnection } from '../../../../../../platform/agentHost/common/agentService.js';
+import { type ClaudeProjectSettings, ClaudeSessionConfigKey } from '../../../../../../platform/agentHost/common/claudeSessionConfigKeys.js';
+import { ICeliadorRepoSettingsTrustService } from './celiadorRepoSettingsTrust.js';
 import { AgentHostCanvasCollection, getAgentHostCanvasDefinitionsChangedEvent } from '../../../../canvases/common/agentHostCanvas.js';
 import { ICanvasContext, ICanvasOwner, isCanvasOwner } from '../../../../canvases/common/canvas.js';
 import { CanvasReference } from '../../../../../../platform/agentHost/common/state/protocol/channels-canvas/state.js';
@@ -1419,6 +1421,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		@IWorkbenchAssignmentService assignmentService: IWorkbenchAssignmentService,
 		@IAgentHostConnectionsService private readonly _connectionsService: IAgentHostConnectionsService,
 		@INotificationService private readonly _notificationService: INotificationService,
+		@ICeliadorRepoSettingsTrustService private readonly _celiadorRepoSettingsTrust: ICeliadorRepoSettingsTrustService,
 	) {
 		super();
 		this._config = config;
@@ -2068,6 +2071,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		let invocationKind: IAgentHostFirstResponseEvent['invocationKind'] = 'unknown';
 		let rendererRootInvocationOrdinal: number | undefined;
 		let trustInteractionRequired = false;
+		let trustFolders: readonly URI[] | undefined; // Celiador
 		const preparingStatus = new MutableDisposable();
 		let failureStage: AgentHostInvocationFailureStage = 'resolveSession';
 		try {
@@ -2078,7 +2082,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			}
 
 			if (this._config.requiresWorkspaceTrust !== false) {
-				const trustFolders = await this._resolveSessionTrustFolders(request.sessionResource, cancellationToken);
+				trustFolders = await this._resolveSessionTrustFolders(request.sessionResource, cancellationToken);
 				if (this._isInvocationAbandoned(cancellationToken)) {
 					return {};
 				}
@@ -2202,6 +2206,9 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			const isExistingTurn = state?.activeTurn?.id === request.requestId || state?.turns.some(turn => turn.id === request.requestId)
 				|| request.acceptedConfirmationData?.some(isResumeTurnConfirmationData);
 			invocationKind = this._isSubagentChat(sessionKey, chatId) ? 'subagent' : isExistingTurn ? 'existingTurn' : 'newTurn';
+			if (sessionTurnKind === 'first' && invocationKind === 'newTurn') {
+				this._celiadorSkipRepoSettingsIfNewlyTrusted(resolvedSession, trustFolders, trustInteractionRequired); // Celiador
+			}
 			const stopWatch = StopWatch.create(false);
 			let firstProgress: number | undefined;
 			const measuredProgress = (parts: IChatProgress[]) => {
@@ -7144,6 +7151,35 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		}
 		return true;
 	}
+
+	// --- Start Celiador ---
+	/**
+	 * Starts a Claude session without the repository's own `.claude` settings
+	 * when its folder was trusted for the first time in this window — by the
+	 * trust prompt of this very send, or earlier from the Restricted Mode banner
+	 * (editor#28). Runs before the first turn so the SDK launches with
+	 * `settingSources: ['user']`; the notification and the "Repository Settings"
+	 * chip switch it back, which relaunches on the next message.
+	 */
+	private _celiadorSkipRepoSettingsIfNewlyTrusted(backendSession: URI, trustFolders: readonly URI[] | undefined, trustPrompted: boolean): void {
+		if (this._config.provider !== CLAUDE_AGENT_PROVIDER_ID) {
+			return;
+		}
+		const folders = trustFolders ?? [];
+		if (!trustPrompted && !this._celiadorRepoSettingsTrust.wasTrustedInThisWindow(folders)) {
+			return;
+		}
+		this._logService.info(`[AgentHost] Starting ${backendSession.toString()} without the repository's .claude settings: its folder was trusted for the first time in this window`);
+		this._dispatchAction(backendSession, {
+			type: ActionType.SessionConfigChanged,
+			config: { [ClaudeSessionConfigKey.ProjectSettings]: 'skip' satisfies ClaudeProjectSettings },
+		});
+		void this._celiadorRepoSettingsTrust.notifyProjectSettingsSkipped(folders, () => this._dispatchAction(backendSession, {
+			type: ActionType.SessionConfigChanged,
+			config: { [ClaudeSessionConfigKey.ProjectSettings]: 'load' satisfies ClaudeProjectSettings },
+		}));
+	}
+	// --- End Celiador ---
 
 	private _convertVariablesToAttachments(variables: readonly IChatRequestVariableEntry[], sessionResource: URI, message: string): MessageAttachment[] {
 		const attachments = this._variableEntriesToAttachments(variables, sessionResource, message);
