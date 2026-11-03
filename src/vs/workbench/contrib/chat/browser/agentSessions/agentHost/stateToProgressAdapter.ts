@@ -1196,6 +1196,18 @@ export function usageInfoToQuotas(usage: UsageInfo | undefined): IAgentHostQuota
 }
 
 /**
+ * Celiador: the fallback text for a failed turn that carries no structured
+ * chat error. A generic `error` type adds nothing, so it reads "Error: {message}"
+ * instead of "Error: (error) {message}"; specific types keep the upstream form.
+ */
+export function formatTurnErrorFallback(error: { readonly errorType: string; readonly message: string }): string {
+	if (error.errorType === 'error') {
+		return localize('agentHost.turnErrorGeneric', "Error: {0}", error.message);
+	}
+	return localize('agentHost.turnError', "Error: ({0}) {1}", error.errorType, error.message);
+}
+
+/**
  * Converts completed turns from the protocol state into session history items.
  *
  * Requests preserve the selected model. Response details use the actual model, except for Fusion's workflow label.
@@ -1310,7 +1322,7 @@ export function turnsToHistory(backendSession: URI, turns: readonly Turn[], part
 		if (turnError) {
 			errorDetails = errorDetailsProvider?.(turn)
 				?? getChatErrorDetailsFromMeta(turnError, errorContext)
-				?? { message: `Error: (${turnError.errorType}) ${turnError.message}` };
+				?? { message: formatTurnErrorFallback(turnError) }; // Celiador: was an unlocalized `Error: (${errorType}) …`
 		}
 
 		const startedAt = turn.startedAt === undefined ? undefined : Date.parse(turn.startedAt);
