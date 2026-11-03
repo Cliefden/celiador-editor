@@ -42,7 +42,7 @@ download from celiador.ai, open without a Gatekeeper prompt, and have auto-updat
    security import developerID_application.cer -k ~/Library/Keychains/celiador-signing.keychain-db
    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "<new password>" ~/Library/Keychains/celiador-signing.keychain-db
    security list-keychains -d user -s ~/Library/Keychains/celiador-signing.keychain-db ~/Library/Keychains/login.keychain-db
-   gh secret set CELIADOR_SIGNING_KEYCHAIN_PASSWORD --repo Cliefden/celiador --body "<new password>"
+   gh secret set CELIADOR_SIGNING_KEYCHAIN_PASSWORD --repo Cliefden/celiador-editor --body "<new password>"
    ```
 
    Locally, `release-macos.sh` finds the identity through the search list; pass
@@ -53,8 +53,32 @@ download from celiador.ai, open without a Gatekeeper prompt, and have auto-updat
    (If the certificate was made from an `openssl` CSR, the `.key` + `.cer` files
    are that backup.)
 
-2. **Notarization credentials.** Already there: `asc` is signed in with the
-   App Store Connect API key (`asc auth status`), which the Notary API accepts.
+2. **Notarization credentials.** Notarization goes through an App Store Connect
+   API key, which the Notary API accepts. Locally, `asc` is signed in with it
+   (`asc auth status`). The runner's session can't read the keychain profile
+   `asc` stores, so the workflow hands `asc` the key explicitly:
+
+   - the key file at `~/.appstoreconnect/private_keys/AuthKey_<key ID>.p8` on
+     the runner Mac;
+   - the key ID in the repository secret `CELIADOR_ASC_KEY_ID`;
+   - the issuer ID in the repository secret `CELIADOR_ASC_ISSUER_ID`.
+
+   The workflow's first step fails with a clear error when either secret or
+   the key file is missing. The key ID never goes in the YAML: rotating the key
+   only touches the secrets and the key file.
+
+   ```sh
+   gh secret set CELIADOR_ASC_KEY_ID --repo Cliefden/celiador-editor --body "<key ID>"
+   gh secret set CELIADOR_ASC_ISSUER_ID --repo Cliefden/celiador-editor --body "<issuer ID>"
+   ```
+
+   **Rotating the key.** In App Store Connect → Users and Access → Integrations
+   → App Store Connect API, create a new key (role Developer is enough for
+   notarization) and download its `.p8` (it can be downloaded only once). Put it
+   at `~/.appstoreconnect/private_keys/AuthKey_<new key ID>.p8` on the runner
+   (`chmod 600`), update `CELIADOR_ASC_KEY_ID` (and `CELIADOR_ASC_ISSUER_ID` if
+   it changed), point the local `asc` profile at the new key (check with `asc auth status`), cut a dev
+   build to confirm notarization, then revoke the old key and delete its `.p8`.
 
 3. **The box.** Nothing to install: the daemon serves the feed from
    `~/daemon/releases`, which the script creates on first publish. Deploy the

@@ -4,8 +4,9 @@
 # Runs on the self-hosted Mac runner (scw-mac), where everything the release
 # needs already lives: the Developer ID Application identity in the login
 # keychain, `asc` signed in to App Store Connect (notarization), and ssh access
-# to the box. No repository secrets — see docs/RELEASING.md for the one-time
-# machine setup. The hosted-runner + S3 variant this replaced never ran.
+# to the box. Repository secrets: CELIADOR_SIGNING_KEYCHAIN_PASSWORD,
+# CELIADOR_ASC_KEY_ID, CELIADOR_ASC_ISSUER_ID — see docs/RELEASING.md for those
+# and the one-time machine setup. The hosted-runner + S3 variant this replaced never ran.
 
 name: Release (macOS)
 
@@ -50,6 +51,31 @@ jobs:
           # a depth-1 checkout would stamp "build 1". The self-hosted runner keeps its
           # checkout, so after the first full fetch this is incremental.
           fetch-depth: 0
+
+      - name: Check release credentials
+        # Fail in seconds, not after the hour-long build, when a secret or the
+        # App Store Connect key file is missing (docs/RELEASING.md, step 2).
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.CELIADOR_SIGNING_KEYCHAIN_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.CELIADOR_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.CELIADOR_ASC_ISSUER_ID }}
+        run: |
+          missing=0
+          require() { # <value> <secret name>
+            if [ -z "$1" ]; then
+              echo "::error::Repository secret $2 is not set (docs/RELEASING.md)."
+              missing=1
+            fi
+          }
+          require "$KEYCHAIN_PASSWORD" CELIADOR_SIGNING_KEYCHAIN_PASSWORD
+          require "$ASC_KEY_ID" CELIADOR_ASC_KEY_ID
+          require "$ASC_ISSUER_ID" CELIADOR_ASC_ISSUER_ID
+          [ "$missing" = 0 ] || exit 1
+          KEY_FILE="$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8"
+          if [ ! -f "$KEY_FILE" ]; then
+            echo "::error::No App Store Connect key file for the key ID in CELIADOR_ASC_KEY_ID at ~/.appstoreconnect/private_keys/ on this runner (docs/RELEASING.md)."
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -128,8 +154,10 @@ jobs:
           # asc keeps its App Store Connect key in the keychain, which this
           # session can't read either; hand it the key file on this Mac instead
           # (complete env credentials take precedence over stored profiles).
-          ASC_KEY_ID: R73AU5822H
-          ASC_ISSUER_ID: 69a6de70-4abf-47e3-e053-5b8c7c11a4d1
+          # Key ID and issuer come from repository secrets so the key can be
+          # rotated without a code change (editor#82).
+          ASC_KEY_ID: ${{ secrets.CELIADOR_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.CELIADOR_ASC_ISSUER_ID }}
         run: |
           set -e
           export ASC_PRIVATE_KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8"
