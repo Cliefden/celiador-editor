@@ -2371,6 +2371,59 @@ suite('resolveAuthenticationInteractively', () => {
 		assert.deepStrictEqual({ success, createSessionCalls }, { success: false, createSessionCalls: 0 });
 	});
 
+	suite('several optional resources (Celiador #81)', () => {
+		const copilot: ProtectedResourceMetadata = { resource: 'https://api.github.com', authorization_servers: ['https://github.com/login/oauth'], scopes_supported: ['read:user'], required: false };
+		const daemon: ProtectedResourceMetadata = { resource: 'https://celiador.ai/api/anthropic', authorization_servers: ['https://celiador.ai'], scopes_supported: [], required: false };
+
+		function setup(signedIn: { github?: boolean; celiador?: boolean }) {
+			const commandService = new TestCommandService();
+			const authService = createMockAuthService({
+				getOrActivateProviderIdForServer: server => Promise.resolve(server.authority === 'celiador.ai' ? 'celiador' : 'github'),
+				getSessions: providerId => Promise.resolve(
+					providerId === 'celiador' ? (signedIn.celiador ? [{ scopes: [], accessToken: 'celiador-token' }] : [])
+						: (signedIn.github ? [{ scopes: ['read:user'], accessToken: 'github-token' }] : [])),
+			});
+			const requests: { resource: string; token: string }[] = [];
+			const instantiationService = createAuthInstantiationService(disposables, authService, commandService);
+			const run = () => instantiationService.invokeFunction(resolveAuthenticationInteractively, [copilot, daemon], {
+				authTokenCache: new AgentHostAuthTokenCache(),
+				logPrefix: '[AgentHost]',
+				authenticate: async request => { requests.push({ resource: request.resource, token: request.token }); },
+			});
+			return { commandService, requests, run };
+		}
+
+		test('forwards a later resource\'s existing session instead of prompting for the first', async () => {
+			const { commandService, requests, run } = setup({ celiador: true });
+			const success = await run();
+			assert.deepStrictEqual({ success, commandCalls: commandService.calls.length, requests }, {
+				success: true,
+				commandCalls: 0,
+				requests: [{ resource: daemon.resource, token: 'celiador-token' }],
+			});
+		});
+
+		test('forwards every resource that has a session, not just the first', async () => {
+			const { commandService, requests, run } = setup({ github: true, celiador: true });
+			const success = await run();
+			assert.deepStrictEqual({ success, commandCalls: commandService.calls.length, requests }, {
+				success: true,
+				commandCalls: 0,
+				requests: [
+					{ resource: copilot.resource, token: 'github-token' },
+					{ resource: daemon.resource, token: 'celiador-token' },
+				],
+			});
+		});
+
+		test('still prompts when no resource has a session', async () => {
+			const { commandService, run } = setup({});
+			commandService.result = { success: undefined, dialogSkipped: false };
+			const success = await run();
+			assert.deepStrictEqual({ success, commandCalls: commandService.calls.length }, { success: false, commandCalls: 1 });
+		});
+	});
+
 	test('propagates product sign-in failures', async () => {
 		const commandService = new TestCommandService();
 		commandService.result = { success: false, dialogSkipped: false, error: new Error('Bad credentials') };
