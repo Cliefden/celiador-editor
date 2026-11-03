@@ -159,6 +159,7 @@ import { ClientToolSetsContribution } from './tools/clientToolSetsContribution.j
 import { RenameToolContribution } from './tools/renameTool.js';
 import { UsagesToolContribution } from './tools/usagesTool.js';
 import { WorkspaceSymbolsToolContribution } from './tools/workspaceSymbolsTool.js'; // Celiador
+import { CeliadorLegacySettingsMigration } from './celiadorLegacySettingsMigration.js'; // Celiador
 import './voiceClient/micCaptureService.js';
 import './voiceClient/ttsPlaybackService.js';
 import './voiceClient/voiceClientService.js';
@@ -3340,6 +3341,7 @@ registerWorkbenchContribution2(BuiltinToolsContribution.ID, BuiltinToolsContribu
 registerWorkbenchContribution2(ClientToolSetsContribution.ID, ClientToolSetsContribution, WorkbenchPhase.Eventually);
 registerWorkbenchContribution2(UsagesToolContribution.ID, UsagesToolContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(WorkspaceSymbolsToolContribution.ID, WorkspaceSymbolsToolContribution, WorkbenchPhase.BlockRestore); // Celiador
+registerWorkbenchContribution2(CeliadorLegacySettingsMigration.ID, CeliadorLegacySettingsMigration, WorkbenchPhase.BlockRestore); // Celiador: drop September-build user settings (editor#80)
 registerWorkbenchContribution2(RenameToolContribution.ID, RenameToolContribution, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(ChatAgentSettingContribution.ID, ChatAgentSettingContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(ChatForegroundSessionCountContribution.ID, ChatForegroundSessionCountContribution, WorkbenchPhase.AfterRestored);
