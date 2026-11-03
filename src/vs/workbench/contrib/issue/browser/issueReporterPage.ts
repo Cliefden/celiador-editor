@@ -17,11 +17,12 @@ const reviewGuidanceLabel = localize( // intentionally not escaped because of it
 	{
 		key: 'reviewGuidanceLabel',
 		comment: [
-			'{Locked="<a href=\"https://github.com/Cliefden/celiador/wiki/Submitting-Bugs-and-Suggestions\" target=\"_blank\">"}',
+			'{Locked="<a href=\"https://celiador.ai/docs#support\" target=\"_blank\">"}',
 			'{Locked="</a>"}'
 		]
 	},
-	'Before you report an issue here please <a href="https://github.com/Cliefden/celiador/wiki/Submitting-Bugs-and-Suggestions" target="_blank">review the guidance we provide</a>. Please complete the form in English.'
+	// Celiador: the Cliefden wiki page never existed; the support docs do.
+	'Before you report an issue here please <a href="https://celiador.ai/docs#support" target="_blank">review the guidance we provide</a>. Please complete the form in English.'
 );
 
 export default (): string => `
