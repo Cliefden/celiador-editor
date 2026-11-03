@@ -121,6 +121,31 @@ suite('IssueReporterOverlay', () => {
 		assert.strictEqual(calls, 0);
 	}));
 
+	test('searches similar product issues through the GitHub issue search', () => runWithFakedTimers({}, async () => {
+		const calls: { repo: string; title: string }[] = [];
+		const container = document.createElement('div');
+		const overlay = store.add(new IssueReporterOverlay({
+			styles: {}, zoomLevel: 0, enabledExtensions: [], restrictedMode: false,
+			isInstallationPure: true, isSessionsWindow: false, githubAccessToken: '',
+			issueType: IssueType.Bug, issueSource: IssueSource.VSCode,
+			issueTitle: 'Product search', issueBody: 'Private description',
+		}, false, container, new TestContextViewService(), async (repo, title) => {
+			calls.push({ repo, title });
+			return [{ html_url: 'https://github.com/owner/repo/issues/2', title: 'Product search result' }];
+		}));
+		overlay.show();
+		const next = container.querySelector<HTMLElement>('.wizard-next');
+		assert.ok(next);
+		next.click();
+		next.click();
+		await timeout(300);
+		await timeout(0);
+		assert.deepStrictEqual({
+			titles: calls.map(call => call.title),
+			resultVisible: container.textContent?.includes('Product search result'),
+		}, { titles: ['Product search'], resultVisible: true });
+	}));
+
 	const createScreenshotReporter = () => {
 		const container = document.createElement('div');
 		const overlay = store.add(new IssueReporterOverlay({

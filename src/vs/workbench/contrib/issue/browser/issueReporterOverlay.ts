@@ -527,13 +527,16 @@ export class IssueReporterOverlay {
 		// Issue guidance link — keep the same wording as the classic reporter.
 		if (this.markdownRendererService) {
 			const guidanceContainer = append(page, $('div.wizard-issue-guidance'));
+			// --- Start Celiador ---
+			// Point at Celiador's support docs, not Microsoft's wiki.
 			const guidanceMd = new MarkdownString(localize(
 				{
 					key: 'reviewGuidanceLabelWizard',
-					comment: ['{Locked="https://github.com/microsoft/vscode/wiki/Submitting-Bugs-and-Suggestions"}']
+					comment: ['{Locked="https://celiador.ai/docs#support"}']
 				},
-				'Before you report an issue here please [review the guidance we provide](https://github.com/microsoft/vscode/wiki/Submitting-Bugs-and-Suggestions). Please complete the form in English.'
+				'Before you report an issue here please [review the guidance we provide](https://celiador.ai/docs#support). Please complete the form in English.'
 			), { isTrusted: true });
+			// --- End Celiador ---
 			const rendered = this.markdownRendererService.render(guidanceMd, {
 				actionHandler: async (link: string) => {
 					await this.openExternalLink?.(link);
@@ -1143,7 +1146,7 @@ export class IssueReporterOverlay {
 				const repo = marketplaceIssueUrl && this.parseGitHubUrl(marketplaceIssueUrl);
 				results = repo ? await this.searchGitHubIssues(`${repo.owner}/${repo.repositoryName}`, title, controller.signal) : [];
 			} else {
-				results = await this.searchVSCodeSimilarIssues(title, this.descriptionTextarea.value.trim(), controller.signal);
+				results = await this.searchVSCodeSimilarIssues(title, controller.signal);
 			}
 			if (request === this.similarIssuesRequest) {
 				this.renderSimilarIssues(results);
@@ -1155,28 +1158,9 @@ export class IssueReporterOverlay {
 		}
 	}
 
-	private async searchVSCodeDuplicates(title: string, body: string, signal: AbortSignal): Promise<ISimilarIssue[]> {
-		const response = await fetch('https://vscode-probot.westus.cloudapp.azure.com:7890/duplicate_candidates', {
-			method: 'POST',
-			body: JSON.stringify({ title, body }),
-			headers: new Headers({ 'Content-Type': 'application/json' }),
-			signal,
-		});
-		const result = await response.json();
-		return Array.isArray(result?.candidates) ? result.candidates : [];
-	}
-
-	private async searchVSCodeSimilarIssues(title: string, body: string, signal: AbortSignal): Promise<readonly ISimilarIssue[]> {
-		try {
-			const duplicates = await this.searchVSCodeDuplicates(title, body, signal);
-			if (duplicates.length) {
-				return duplicates;
-			}
-		} catch {
-			signal.throwIfAborted();
-			// Fall back to GitHub search below.
-		}
-
+	private async searchVSCodeSimilarIssues(title: string, signal: AbortSignal): Promise<readonly ISimilarIssue[]> {
+		// Celiador: never send the user's issue title/body to Microsoft's duplicate-detection
+		// service (vscode-probot); search the product's own GitHub issues instead.
 		const repo = this.getIssueTargetRepo();
 		return repo ? this.searchGitHubIssues(`${repo.owner}/${repo.repositoryName}`, title, signal) : [];
 	}
@@ -1223,7 +1207,6 @@ export class IssueReporterOverlay {
 	/** Update the guidance text above the description based on selected category */
 	private updateDescriptionGuidance(): void {
 		const markdownHint = localize('markdownSupported', "Markdown formatting is supported.");
-		const perfWikiUrl = 'https://github.com/microsoft/vscode/wiki/Performance-Issues';
 
 		// Reset before updating
 		this.descriptionGuidanceDisposables.clear();
@@ -1242,20 +1225,10 @@ export class IssueReporterOverlay {
 			case IssueType.FeatureRequest:
 				appendText(`${localize('featureGuidance', "Describe the feature you'd like to see, what problem it would solve, and any alternatives you've considered.")}\n${markdownHint}`);
 				break;
-			case IssueType.PerformanceIssue: {
-				appendText(`${localize('perfGuidance', "Describe what is slow, when it happens, whether it's consistent or intermittent, and any patterns you've noticed.")} `);
-				const link = $('a.wizard-description-guidance-link') as HTMLAnchorElement;
-				link.href = perfWikiUrl;
-				link.textContent = localize('perfWikiLink', "See the performance issue reporting guide.");
-				this.descriptionGuidanceDisposables.add(addDisposableListener(link, EventType.CLICK, e => {
-					e.preventDefault();
-					this.openExternalLink?.(perfWikiUrl);
-				}));
-				this.descriptionGuidance.appendChild(link);
-				appendText(`\n${markdownHint}`);
-				this.descriptionGuidance.classList.add('wizard-description-guidance-with-link');
+			case IssueType.PerformanceIssue:
+				// Celiador: no link to Microsoft's performance wiki; Celiador has no such guide yet.
+				appendText(`${localize('perfGuidance', "Describe what is slow, when it happens, whether it's consistent or intermittent, and any patterns you've noticed.")}\n${markdownHint}`);
 				break;
-			}
 			default:
 				appendText(`${localize('defaultGuidance', "Select a category above, then describe your feedback in detail.")}\n${markdownHint}`);
 				break;
