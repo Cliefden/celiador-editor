@@ -29,7 +29,7 @@ import { IChatService } from '../../../common/chatService/chatService.js';
 import { ChatSessionStatus } from '../../../common/chatSessionsService.js';
 import { isAgentHostTarget } from '../agentSessions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
-import { CeliadorRelayClient, IRelayGitArgs, RelayFsKind, RelayGitKind, summarizeRelayToolInput } from './celiadorRelayClient.js';
+import { CeliadorRelayClient, ICeliadorRelayClientOptions, IRelayGitArgs, RelayFsKind, RelayGitKind, summarizeRelayToolInput } from './celiadorRelayClient.js';
 import { getCeliadorTaskRun } from './celiadorTaskRuns.js';
 
 type PhoneCommandClassification = {
@@ -248,8 +248,17 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		return true;
 	}
 
+	/**
+	 * Creates the relay client for one mirrored session. Tests override this to
+	 * observe routing without the network. Called from the constructor (via
+	 * {@link _reconcile}), so an override must not depend on its own instance fields.
+	 */
+	protected _newRelayClient(options: ICeliadorRelayClientOptions): CeliadorRelayClient {
+		return new CeliadorRelayClient(options);
+	}
+
 	private _createClient(key: string, resource: URI): CeliadorRelayClient {
-		const client = new CeliadorRelayClient({
+		const client = this._newRelayClient({
 			getUrl: () => this._daemonUrl(),
 			getToken: () => this._token(),
 			log: message => this._logService.trace(`[celiador-relay] ${message}`),
