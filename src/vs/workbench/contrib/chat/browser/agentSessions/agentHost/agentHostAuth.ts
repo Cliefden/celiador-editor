@@ -817,6 +817,18 @@ export async function resolveAuthenticationInteractively(
 	const logService = accessor.get(ILogService);
 	const telemetryService = accessor.get(ITelemetryService);
 	const resolvedOptions = resolveAuthenticationOptions(accessor, options);
+	// Celiador edit (#81): an agent can list several protected resources, and the
+	// one it actually needs is not necessarily the first. Claude lists the optional
+	// GitHub Copilot resource first and the Celiador daemon resource last; upstream
+	// only ever looked at the first, so a user signed in to Celiador (but not to
+	// GitHub) got the GitHub sign-in dialog, and one signed in to GitHub had only
+	// that token forwarded. Forward every resource that already has a signed-in
+	// session, and prompt only for a required resource that has none, or, when
+	// every resource is optional, only when none of them has a session.
+	type Unresolved = { readonly resource: ProtectedResourceMetadata; readonly resolution: AuthenticationSessionResolution; readonly rejectedSession: RejectedAuthenticationSession | undefined };
+	let firstUnresolved: Unresolved | undefined;
+	let firstUnresolvedRequired: Unresolved | undefined;
+	let anyResolved = false;
 	for (const resource of protectedResources) {
 		throwIfAuthenticationStale(options);
 		const scopes = resource.scopes_supported ?? [];
@@ -834,19 +846,31 @@ export async function resolveAuthenticationInteractively(
 				});
 			}
 			logService.info(`${options.logPrefix} Interactive authentication succeeded for ${resource.resource}`);
-			return true;
+			anyResolved = true;
+			continue;
 		}
-
-		reportAgentHostAuthRecovery(telemetryService, {
-			trigger: 'sessionCreation',
-			action: 'prompt',
-			initialSessionMatch: existingSessionResolution.kind === 'signedOut' ? 'none' : 'unavailable',
-			quarantinePresent: rejectedSession !== undefined,
-		});
-		return (await forceAuthenticationInteractively(authenticationService, commandService, logService, telemetryService, resource, resolvedOptions, 'sessionCreation', rejectedSession?.accessToken)) !== undefined;
+		const unresolved: Unresolved = { resource, resolution: existingSessionResolution, rejectedSession };
+		firstUnresolved ??= unresolved;
+		if (resource.required !== false) {
+			// A required resource keeps upstream's behaviour: prompt for it at once.
+			firstUnresolvedRequired = unresolved;
+			break;
+		}
 	}
 
-	return false;
+	const toPrompt = firstUnresolvedRequired ?? (anyResolved ? undefined : firstUnresolved);
+	if (!toPrompt) {
+		return anyResolved;
+	}
+
+	const { resource, resolution, rejectedSession } = toPrompt;
+	reportAgentHostAuthRecovery(telemetryService, {
+		trigger: 'sessionCreation',
+		action: 'prompt',
+		initialSessionMatch: resolution.kind === 'signedOut' ? 'none' : 'unavailable',
+		quarantinePresent: rejectedSession !== undefined,
+	});
+	return (await forceAuthenticationInteractively(authenticationService, commandService, logService, telemetryService, resource, resolvedOptions, 'sessionCreation', rejectedSession?.accessToken)) !== undefined;
 }
 
 async function forceAuthenticationInteractively(

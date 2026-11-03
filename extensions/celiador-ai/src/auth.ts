@@ -5,6 +5,7 @@
 import * as vscode from 'vscode';
 import { getRestrictedSetting } from './config';
 import { resolveDaemonUrl, resolveUrlProtocol } from './productConfig';
+import { parseStoredSession, planRefresh, sameSession, type Session } from './sessionSync';
 
 // Dependency-free Supabase/GoTrue client for the editor. Supports PKCE-protected
 // OAuth and magic-link flows. Session stored in VS Code SecretStorage, access token
@@ -24,13 +25,6 @@ const PKCE_KEY = 'celiador.pkce';
 // must contain it.
 export function authRedirect(): string {
   return `${resolveUrlProtocol()}://celiador.celiador-ai/auth-callback`;
-}
-
-export interface Session {
-  access_token: string;
-  refresh_token: string;
-  expires_at: number; // unix seconds
-  email?: string;
 }
 
 /** Best-effort email from a JWT payload (no verification — display only). */
@@ -55,15 +49,55 @@ export interface SignInMethods {
   github?: boolean;
 }
 
-export class Auth {
+export class Auth implements vscode.Disposable {
   private cached: Session | null | undefined;
   private supaConfig: { base: string; anonKey: string; signIn?: SignInMethods } | undefined;
   private readonly onChange = new vscode.EventEmitter<void>();
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Fires whenever the signed-in state changes (sign in/out/refresh). */
+  /** The in-flight refresh, so the timer and an on-demand refresh share one GoTrue call. */
+  private refreshing: Promise<Session> | undefined;
+  private readonly secretsSub: vscode.Disposable;
+  /** Fires whenever the signed-in state changes (sign in/out/refresh), in this window or another. */
   readonly onDidChange = this.onChange.event;
 
-  constructor(private readonly secrets: vscode.SecretStorage) {}
+  constructor(private readonly secrets: vscode.SecretStorage) {
+    // Every window runs its own copy of this class, but they share SecretStorage.
+    // Follow sign-in, sign-out and refreshes made by other windows (e.g. signing in
+    // from an editor window while the Agents window is open — #81).
+    this.secretsSub = secrets.onDidChange((e) => {
+      if (e.key === SESSION_KEY) {
+        void this.syncFromStorage();
+      }
+    });
+  }
+
+  dispose(): void {
+    if (this.refreshTimer) {clearTimeout(this.refreshTimer);}
+    this.refreshTimer = undefined;
+    this.secretsSub.dispose();
+    this.onChange.dispose();
+  }
+
+  /** Adopt whatever SecretStorage holds now, if it differs from this window's copy. */
+  private async syncFromStorage(): Promise<Session | null> {
+    const stored = parseStoredSession(await this.secrets.get(SESSION_KEY));
+    if (this.cached !== undefined && sameSession(this.cached, stored)) {
+      return this.cached;
+    }
+    this.adopt(stored);
+    return stored;
+  }
+
+  private adopt(s: Session | null): void {
+    this.cached = s;
+    if (s) {
+      this.scheduleRefresh(s);
+    } else if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = undefined;
+    }
+    this.onChange.fire();
+  }
 
   private daemonUrl(): string {
     return resolveDaemonUrl();
@@ -247,8 +281,9 @@ export class Auth {
 
   private async load(): Promise<Session | null> {
     if (this.cached !== undefined) {return this.cached;}
-    const raw = await this.secrets.get(SESSION_KEY);
-    this.cached = raw ? (JSON.parse(raw) as Session) : null;
+    const stored = parseStoredSession(await this.secrets.get(SESSION_KEY));
+    if (this.cached !== undefined) {return this.cached;} // set meanwhile (sign-in or sync)
+    this.cached = stored;
     if (this.cached) {this.scheduleRefresh(this.cached);}
     return this.cached;
   }
@@ -285,10 +320,38 @@ export class Auth {
     return (await this.load())?.email;
   }
 
-  private async refresh(s: Session): Promise<Session> {
-    const next = this.toSession(await this.gotrue('token?grant_type=refresh_token', { refresh_token: s.refresh_token }));
-    await this.store(next);
-    return next;
+  private refresh(s: Session): Promise<Session> {
+    if (!this.refreshing) {
+      this.refreshing = this.doRefresh(s).finally(() => { this.refreshing = undefined; });
+    }
+    return this.refreshing;
+  }
+
+  private async doRefresh(s: Session): Promise<Session> {
+    // Another window may already have rotated this session (or signed out). Its
+    // refresh token is single use, so take the stored session rather than spend it.
+    const before = planRefresh(s, parseStoredSession(await this.secrets.get(SESSION_KEY)));
+    if (before.kind === 'signedOut') {
+      if (this.cached !== null) {this.adopt(null);}
+      throw new Error('Not signed in.');
+    }
+    if (before.kind === 'adopt') {
+      if (!sameSession(this.cached, before.session)) {this.adopt(before.session);}
+      return before.session;
+    }
+    try {
+      const next = this.toSession(await this.gotrue('token?grant_type=refresh_token', { refresh_token: s.refresh_token }));
+      await this.store(next);
+      return next;
+    } catch (err) {
+      // Lost a race with another window refreshing the same token: use its result.
+      const after = planRefresh(s, parseStoredSession(await this.secrets.get(SESSION_KEY)));
+      if (after.kind === 'adopt') {
+        if (!sameSession(this.cached, after.session)) {this.adopt(after.session);}
+        return after.session;
+      }
+      throw err;
+    }
   }
 
   /** Force a refresh (used after a daemon 401). Returns false if not signed in. */

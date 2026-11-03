@@ -72,6 +72,7 @@ async function probeDaemon(): Promise<string> {
 export function activate(context: vscode.ExtensionContext): void {
   console.log('[celiador-ai] activated');
   auth = new Auth(context.secrets);
+  context.subscriptions.push(auth);
 
   // App data (profile + chat history + account summary) served by the daemon over the shared JWT.
   const api = new DaemonApi(auth, () => daemonUrl());
