@@ -17,6 +17,7 @@ import { customizationMarketplaceConfigurationProperties, isAgentFinderPublicFee
 import { CopilotImageGenerationEnabledSettingId, CopilotImageGenerationModelSettingId } from '../../../../../platform/agentHost/common/copilotCliConfig.js';
 import '../../browser/agentSessionsConfiguration.js';
 import { IPluginMarketplaceService } from '../../common/plugins/pluginMarketplaceService.js';
+import product from '../../../../../platform/product/common/product.js';
 
 const configurationProperties = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).getConfigurationProperties();
 const registeredAgentSessionsSettings = [
@@ -31,6 +32,8 @@ const legacyImageGenerationMigration = migrations.find(migration => migration.ke
 const legacyProgressAnimationMigration = migrations.find(migration => migration.key === ChatConfiguration.PersistentProgress);
 const legacyProgressVerbosityMigration = migrations.find(migration => migration.key === ChatConfiguration.PersistentProgressVerbosity);
 const persistentProgressSetting = chatProgressConfigurationProperties[ChatConfiguration.PersistentProgress];
+// Celiador: branded builds default to the icon-free Draw variant (no VS Code mark).
+const expectedProgressDefault = product.nameShort === 'Code - OSS' ? 'draw' : 'drawMonochromeNoIcon';
 
 suite('Chat configuration', () => {
 
@@ -177,7 +180,7 @@ suite('Chat configuration', () => {
 			experiment: persistentProgressSetting.experiment,
 		}, {
 			type: 'string',
-			default: 'draw',
+			default: expectedProgressDefault,
 			tags: ['experimental'],
 			experiment: { mode: 'auto', name: 'config.chat.experimental.persistentProgress' },
 		});
@@ -195,7 +198,7 @@ suite('Chat configuration', () => {
 		}, {
 			settings: ['chat.progressBorder.enabled', 'chat.persistentProgress', 'chat.persistentProgressVerbosity'],
 			type: 'string',
-			default: 'draw',
+			default: expectedProgressDefault,
 			values: ['off', 'draw', 'drawMonochrome', 'drawMonochromeNoIcon'],
 			labels: ['Off', 'Draw', 'Draw (Monochrome)', 'Draw (Monochrome, No Icon)'],
 			descriptions: 4,

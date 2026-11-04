@@ -1858,6 +1858,16 @@ suite('stateToProgressAdapter', () => {
 			assert.ok(!response.parts.some(p => p.kind === 'markdownContent' && (p as IChatMarkdownContent).content.value.includes('boom')), 'Error should not be duplicated as a markdown part');
 		});
 
+		test('generic error type renders without a parenthesised label (Celiador)', () => {
+			const turn = createTurn({
+				state: TurnState.Error,
+				responseParts: [createErrorResponsePart({ errorType: 'error', message: 'boom' })],
+			});
+
+			const response = turnsToHistory(URI.file('/'), [turn], 'p')[1];
+			assert.strictEqual(response.type === 'response' ? response.errorDetails?.message : undefined, 'Error: boom');
+		});
+
 		test('historical resumable errors can restore Try Again without rendering completed errors', () => {
 			const resumableError = createErrorResponsePart({ errorType: 'test', message: 'boom' }, true);
 			const errorTurn = createTurn({ state: TurnState.Error, responseParts: [resumableError] });

@@ -543,7 +543,11 @@ function mapResult(
 				turnId,
 				duration: typeof turnDuration === 'number' && Number.isFinite(turnDuration) ? Math.max(0, turnDuration) : 0,
 				part: createErrorResponsePart({
-					errorType: message.subtype,
+					// Celiador: an in-band error arrives as `subtype: 'success'` with
+					// `is_error: true`; reporting that subtype rendered "Error: (success) …".
+					// Use the generic `error` type, which the workbench renders without a
+					// parenthesised label (see `formatTurnErrorFallback`).
+					errorType: message.subtype === 'success' ? 'error' : message.subtype,
 					...extractForwardedErrorInfo(errorText),
 					...(daemonRefusal ? { message: daemonRefusal } : {}),
 				}),

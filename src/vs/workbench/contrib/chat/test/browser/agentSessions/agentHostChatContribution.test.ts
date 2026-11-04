@@ -118,6 +118,7 @@ import { IWorkspaceContextService, WorkbenchState } from '../../../../../../plat
 import { IWorkspaceTrustEnablementService, IWorkspaceTrustManagementService, IWorkspaceTrustRequestService, ResourceTrustRequestOptions } from '../../../../../../platform/workspace/common/workspaceTrust.js';
 import { AgentHostContribution, AgentHostSessionHandler } from '../../../browser/agentSessions/agentHost/agentHostChatContribution.js';
 import { IAgentHostFirstResponseEvent } from '../../../browser/agentSessions/agentHost/agentHostFirstResponseTelemetry.js';
+import { ICeliadorRepoSettingsTrustService } from '../../../browser/agentSessions/agentHost/celiadorRepoSettingsTrust.js';
 import type { IAgentHostFirstResponseDiagnostic } from '../../../../../../platform/agentHost/common/otel/agentHostTiming.js';
 import { AgentHostAuthTokenCache } from '../../../browser/agentSessions/agentHost/agentHostAuth.js';
 import { AgentHostLanguageModelProvider } from '../../../browser/agentSessions/agentHost/agentHostLanguageModelProvider.js';
@@ -926,6 +927,19 @@ class MockWorkingCopyService extends mock<IWorkingCopyService>() {
 	}
 }
 
+/** Celiador: records the repository-settings decisions the handler asks for (editor#28). */
+class TestRepoSettingsTrust implements ICeliadorRepoSettingsTrustService {
+	declare readonly _serviceBrand: undefined;
+	newlyTrusted = false;
+	readonly notified: string[][] = [];
+	wasTrustedInThisWindow(): boolean {
+		return this.newlyTrusted;
+	}
+	async notifyProjectSettingsSkipped(folders: readonly URI[]): Promise<void> {
+		this.notified.push(folders.map(folder => folder.toString()));
+	}
+}
+
 // ---- Helpers ----------------------------------------------------------------
 
 function createTestServices(disposables: DisposableStore, workingDirectoryResolver?: { resolve(sessionResource: URI): URI | undefined; isNewSession?: (sessionResource: URI) => boolean }, authServiceOverride?: Partial<IAuthenticationService>, languageModels?: ReadonlyMap<string, ILanguageModelChatMetadata>, provisionalServiceOverride?: Partial<IAgentHostUntitledProvisionalSessionService>, isSessionsWindow = false, languageModelToolsServiceOverride?: Partial<ILanguageModelToolsService>, configOverrides?: Record<string, unknown>, chatSessionsServiceOverride?: Partial<IChatSessionsService>, chatDebugServiceOverride?: Partial<IChatDebugService>, remoteAgentHostServiceOverride?: Partial<IRemoteAgentHostService>, customizationServiceOverride?: IAgentHostCustomizationService, agentHostTerminalServiceOverride?: Partial<IAgentHostTerminalService>, languageModelsServiceOverride?: Partial<ILanguageModelsService>, workspaceFolders: readonly URI[] = []) {
@@ -1041,6 +1055,7 @@ function createTestServices(disposables: DisposableStore, workingDirectoryResolv
 		override error(): void { }
 		override prompt() { return new NoOpNotification(); }
 	});
+	instantiationService.stub(ICeliadorRepoSettingsTrustService, new TestRepoSettingsTrust());
 	instantiationService.stub(IConfigurationService, {
 		onDidChangeConfiguration: Event.None,
 		inspect: () => ({ policyValue: undefined }),
@@ -8215,6 +8230,46 @@ suite('AgentHostChatContribution', () => {
 				trustInteractionRequired: [false],
 			});
 		}));
+
+		suite('Celiador: repository settings of a newly trusted folder (editor#28)', () => {
+			function projectSettingsDispatches(agentHostService: MockAgentHostService): unknown[] {
+				return agentHostService.dispatchedActions
+					.filter(entry => entry.action.type === ActionType.SessionConfigChanged && Object.hasOwn(entry.action.config, 'projectSettings'))
+					.map(entry => (entry.action as { config: Record<string, unknown> }).config.projectSettings);
+			}
+
+			async function runFirstTurn(options: { provider: string; trustPrompted: boolean; newlyTrusted: boolean }) {
+				const folder = URI.file('/fresh-clone');
+				const contribution = createContribution(disposables, { provider: options.provider, workspaceFolders: [folder] });
+				const { sessionHandler, agentHostService, chatAgentService, trustController, instantiationService } = contribution;
+				if (!options.trustPrompted) {
+					trustController.trustedUris.add(folder.toString());
+				}
+				const repoSettings = instantiationService.get(ICeliadorRepoSettingsTrustService) as TestRepoSettingsTrust;
+				repoSettings.newlyTrusted = options.newlyTrusted;
+				const { turnPromise, session, turnId, fire } = await startTurn(sessionHandler, agentHostService, chatAgentService, disposables, { message: 'Hi' });
+				const dispatched = projectSettingsDispatches(agentHostService);
+				fire({ type: 'chat/turnComplete', endedAt: '2025-01-01T00:00:00.000Z', session, turnId } as ChatAction);
+				await turnPromise;
+				return { dispatched, notified: repoSettings.notified.length };
+			}
+
+			test('skips them when this send prompted for trust', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+				assert.deepStrictEqual(await runFirstTurn({ provider: 'claude', trustPrompted: true, newlyTrusted: false }), { dispatched: ['skip'], notified: 1 });
+			}));
+
+			test('skips them when the folder was trusted earlier in this window', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+				assert.deepStrictEqual(await runFirstTurn({ provider: 'claude', trustPrompted: false, newlyTrusted: true }), { dispatched: ['skip'], notified: 1 });
+			}));
+
+			test('loads them for a folder trusted before this window', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+				assert.deepStrictEqual(await runFirstTurn({ provider: 'claude', trustPrompted: false, newlyTrusted: false }), { dispatched: [], notified: 0 });
+			}));
+
+			test('leaves other providers alone', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+				assert.deepStrictEqual(await runFirstTurn({ provider: 'copilotcli', trustPrompted: true, newlyTrusted: true }), { dispatched: [], notified: 0 });
+			}));
+		});
 
 		test('resuming an existing session gates on its persisted folder and aborts on decline', async () => {
 			const { sessionHandler, agentHostService, chatAgentService, trustController } = createContribution(disposables);

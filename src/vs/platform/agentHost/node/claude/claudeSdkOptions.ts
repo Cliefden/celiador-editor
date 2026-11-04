@@ -10,7 +10,7 @@ import { delimiter, dirname, normalize } from '../../../../base/common/path.js';
 import { URI } from '../../../../base/common/uri.js';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { AiAgentEnvValue, AiAgentEnvVar } from '../../../chat/common/aiAgentEnv.js';
-import { ClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
+import { ClaudePermissionMode, type ClaudeProjectSettings } from '../../common/claudeSessionConfigKeys.js';
 import { resolveClaudeEffort } from '../../common/claudeModelConfig.js';
 import { PendingRequestRegistry } from '../../common/pendingRequestRegistry.js';
 import type { ModelSelection } from '../../common/state/protocol/state.js';
@@ -96,6 +96,11 @@ export interface IBuildOptionsInput {
 	 * Omit when no custom agent is selected (SDK default behavior).
 	 */
 	readonly agent?: string;
+	/**
+	 * Celiador: whether the repository's own `.claude` settings load (see
+	 * {@link claudeSettingSources}). Omitted means `'load'`.
+	 */
+	readonly projectSettings?: ClaudeProjectSettings;
 	readonly telemetry?: IAgentHostNativeOTelConfig;
 	readonly traceContext?: IAgentHostTraceContext;
 	readonly getUserPromptAdditionalContext?: () => string | undefined;
@@ -204,7 +209,7 @@ export async function buildOptions(
 			? { plugins: input.plugins.map(plugin => ({ type: 'local' as const, path: plugin.uri.fsPath, skipMcpDiscovery: plugin.skipMcpDiscovery })) }
 			: {}),
 		...(input.agent ? { agent: input.agent } : {}),
-		settingSources: ['user', 'project', 'local'],
+		settingSources: claudeSettingSources(input.projectSettings), // Celiador
 		settings: {
 			env: settingsEnv,
 			...(input.deniedMcpServers?.length
@@ -216,6 +221,19 @@ export async function buildOptions(
 		stderr: logStderr,
 	};
 }
+
+// --- Start Celiador ---
+/**
+ * The SDK `settingSources` for a session. `'skip'` (a folder trusted for the
+ * first time in this window, editor#28) keeps the user's own settings and
+ * drops the repository's `project` + `local` scopes, which carry its hooks,
+ * agents, skills, MCP servers and `CLAUDE.md`. Anything else keeps upstream's
+ * `['user', 'project', 'local']` (the `managed` scope stays excluded).
+ */
+export function claudeSettingSources(projectSettings: ClaudeProjectSettings | undefined): NonNullable<Options['settingSources']> {
+	return projectSettings === 'skip' ? ['user'] : ['user', 'project', 'local'];
+}
+// --- End Celiador ---
 
 /**
  * Consume the diff (clears its dirty bit) and build the in-process MCP

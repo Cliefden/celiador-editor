@@ -5,6 +5,7 @@
 
 import { localize } from '../../../../nls.js';
 import { IConfigurationPropertySchema } from '../../../../platform/configuration/common/configurationRegistry.js';
+import product from '../../../../platform/product/common/product.js';
 import { Registry } from '../../../../platform/registry/common/platform.js';
 import { ConfigurationKeyValuePairs, ConfigurationMigration, Extensions, IConfigurationMigrationRegistry } from '../../../common/configuration.js';
 import { ChatConfiguration, ChatProgressAnimation, ChatProgressVerbosity } from '../common/constants.js';
@@ -20,7 +21,9 @@ export const chatProgressConfigurationProperties = {
 	},
 	[ChatConfiguration.PersistentProgress]: {
 		type: 'string',
-		default: ChatProgressAnimation.Draw,
+		// Celiador: Draw animates the VS Code mark next to the working message; branded
+		// builds keep the same persistent progress but without that icon.
+		default: product.nameShort === 'Code - OSS' ? ChatProgressAnimation.Draw : ChatProgressAnimation.DrawMonochromeNoIcon,
 		enum: Object.values(ChatProgressAnimation),
 		enumItemLabels: [
 			localize('chat.progressAnimation.off.label', "Off"),

@@ -17,7 +17,7 @@ import { IInstantiationService } from '../../../instantiation/common/instantiati
 import { ILogService } from '../../../log/common/log.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { ISyncedCustomization } from '../../common/agentPluginManager.js';
-import { ClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
+import { ClaudePermissionMode, type ClaudeProjectSettings } from '../../common/claudeSessionConfigKeys.js';
 import { ClaudeRuntimeEffortLevel, toRuntimeEffortLevel, resolveClaudeEffort } from '../../common/claudeModelConfig.js';
 import { AgentPermissionKind, AgentSignal, IAgentSessionProjectInfo, type IAgentChatOwnerRef } from '../../common/agent.js';
 import type { IAgentHostClientTelemetryContext } from '../../common/agentHostTelemetry.js';
@@ -35,7 +35,7 @@ import { buildClientMcpServers, buildOptions, toClaudeMcpServers, type ClaudeDen
 import { claudeTransportForProvider, parseClaudeModelSelection, toClaudeSdkModelId } from './claudeModelSelection.js';
 import { buildServerToolMcpServer, CLAUDE_SERVER_TOOL_MCP_SERVER_NAME, serverToolAllowList } from './claudeServerToolMcpServer.js';
 import { convertToolCallResult } from './clientTools/claudeClientToolResult.js';
-import { readClaudePermissionMode } from './claudeSessionPermissionMode.js';
+import { readClaudePermissionMode, readClaudeProjectSettings } from './claudeSessionPermissionMode.js';
 import { SessionClientToolsDiff } from './clientTools/claudeSessionClientToolsModel.js';
 import { SessionClientCustomizationsDiff } from './customizations/claudeSessionClientCustomizationsModel.js';
 import { ClaudeCustomizationWatcher, buildDiscoveredCustomizations, createClaudeInternalMcpServerCustomization, resolveClaudeAgentName } from './customizations/claudeSessionCustomizationDiscovery.js';
@@ -233,6 +233,8 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 	private _mcpDiscovery: SessionMcpDiscovery | undefined;
 	private _mcpLaunchEnablementRevision = 0;
 	private _appliedMcpLaunchEnablementRevision = 0;
+	/** Celiador: the `projectSettings` the running SDK process was started with (editor#28). */
+	private _appliedProjectSettings: ClaudeProjectSettings | undefined;
 
 	/** Exposed for the materializer's MCP-server build closure. */
 	get pendingClientToolCalls(): PendingRequestRegistry<CallToolResult> { return this._pendingClientToolCalls; }
@@ -663,6 +665,7 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 		this._registerCeliadorMirror(ctx.transport); // Celiador
 
 		const permissionMode = resolveCurrentPermissionMode(this._configurationService, launchOwner, this._chatChannelUri, this._inheritedPermissionMode, this._permissionModeFallback);
+		const projectSettings = this._currentProjectSettings(launchOwner); // Celiador
 		const plugins = this._desiredClientPluginConfigs(launchOwner);
 		this.clientCustomizationsDiff.consume(plugins.map(plugin => plugin.uri));
 		const mcpLaunchEnablementRevision = this._mcpLaunchEnablementRevision;
@@ -688,6 +691,7 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 				allowedTools,
 				plugins,
 				agent: agentName,
+				projectSettings, // Celiador
 				telemetry,
 				traceContext,
 				getUserPromptAdditionalContext: () => this._hostInstructions?.join('\n\n'),
@@ -697,7 +701,7 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 			data => this._logService.error(`[Claude SDK stderr] ${data}`),
 		);
 
-		this._logService.info(`[Claude] session ${this.sessionId}: enableFileCheckpointing=${options.enableFileCheckpointing} isResume=${ctx.isResume}`);
+		this._logService.info(`[Claude] session ${this.sessionId}: enableFileCheckpointing=${options.enableFileCheckpointing} isResume=${ctx.isResume} settingSources=${options.settingSources?.join(',')}`);
 
 		const warm = await this._sdkService.startup({ options });
 
@@ -747,6 +751,7 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 		// `startup` / pipeline-create) leaves it staged for the next retry.
 		this._pendingResumeSessionAt = undefined;
 		this._appliedMcpLaunchEnablementRevision = mcpLaunchEnablementRevision;
+		this._appliedProjectSettings = projectSettings; // Celiador
 
 		// Seed the pipeline's bijective config cache so a rebuild re-applies
 		// the user's last-chosen model / effort without losing the picker
@@ -805,6 +810,7 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 			const rebuildMcpLaunchEnablementRevision = this._mcpLaunchEnablementRevision;
 			const { mcpServers: rebuildMcp, deniedMcpServers: rebuildDeniedMcpServers, allowedTools: rebuildAllowedTools, agentMergeRestrictedMcpServerNames: rebuildAgentMergeRestrictedMcpServerNames } = await this._buildStartupToolWiring(launchOwner, ctx.serverToolHost);
 			const rebuildAgentName = await resolveClaudeAgentName(this._provisionalAgent, this._fileService, this._logService, this.sessionId);
+			const rebuildProjectSettings = this._currentProjectSettings(launchOwner); // Celiador
 			const rebuildOptions = await buildOptions(
 				{
 					sessionId: this.sessionId,
@@ -822,6 +828,7 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 					allowedTools: rebuildAllowedTools,
 					plugins: rebuildPlugins,
 					agent: rebuildAgentName,
+					projectSettings: rebuildProjectSettings, // Celiador
 					telemetry,
 					traceContext,
 					getUserPromptAdditionalContext: () => this._hostInstructions?.join('\n\n'),
@@ -830,8 +837,9 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 				rebuildTransport,
 				data => this._logService.error(`[Claude SDK stderr] ${data}`),
 			);
-			this._logService.info(`[Claude] session ${this.sessionId}: rebuild isResume=${!!rebuildOptions.resume} agent=${rebuildOptions.agent ?? '(none)'}`);
+			this._logService.info(`[Claude] session ${this.sessionId}: rebuild isResume=${!!rebuildOptions.resume} agent=${rebuildOptions.agent ?? '(none)'} settingSources=${rebuildOptions.settingSources?.join(',')}`);
 			rebuildWarm = await this._sdkService.startup({ options: rebuildOptions });
+			this._appliedProjectSettings = rebuildProjectSettings; // Celiador
 			this._pendingResumeSessionAt = undefined;
 			this._appliedMcpLaunchEnablementRevision = rebuildMcpLaunchEnablementRevision;
 			this._appliedAdditionalDirectories = this._desiredAdditionalDirectories;
@@ -1105,6 +1113,8 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 			|| this._pendingResumeSessionAt !== undefined
 			|| !areAdditionalWorkingDirectoriesEqual(this._appliedAdditionalDirectories, this._desiredAdditionalDirectories)
 			|| this._pendingTransportSwitch
+			// Celiador: the user loaded (or dropped) the repository's own settings; `settingSources` is fixed at startup.
+			|| (this._appliedProjectSettings !== undefined && this._appliedProjectSettings !== this._currentProjectSettings(this._owner.get()))
 			// The chat changed owner since its process launched: relaunch with the new owner at this turn boundary.
 			|| (this._materializedOwner !== undefined && !isEqual(this._materializedOwner, this._owner.get()))) {
 			await this._rebindForSyncedState();
@@ -1123,6 +1133,14 @@ export class ClaudeAgentSession extends Disposable implements IRematerializer {
 	}
 
 	// --- Start Celiador ---
+	/**
+	 * Whether this launch loads the repository's own `.claude` settings
+	 * (editor#28). Unset (no schema registered yet) keeps upstream's `'load'`.
+	 */
+	private _currentProjectSettings(owner: URI): ClaudeProjectSettings {
+		return readClaudeProjectSettings(this._configurationService, owner, this._chatChannelUri) ?? 'load';
+	}
+
 	/**
 	 * The session's single SDK `PreToolUse` decision: the Agent Merge
 	 * restriction first (a hard deny), then the protected-edit prompt (an

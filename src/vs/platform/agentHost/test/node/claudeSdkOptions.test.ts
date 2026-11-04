@@ -280,6 +280,16 @@ suite('claudeSdkOptions / buildOptions plugins projection', () => {
 		assert.strictEqual(opts.plugins, undefined);
 	});
 
+	test('Celiador: projectSettings skip loads only the user setting source', async () => {
+		const settingSources = await Promise.all([undefined, 'load' as const, 'skip' as const].map(async projectSettings =>
+			(await buildOptions({ ...input(undefined), projectSettings }, proxyTransport, () => { })).settingSources));
+		assert.deepStrictEqual(settingSources, [
+			['user', 'project', 'local'],
+			['user', 'project', 'local'],
+			['user'],
+		]);
+	});
+
 	test('projects denied workspace MCP servers into startup settings', async () => {
 		const opts = await buildOptions({
 			...input(undefined),

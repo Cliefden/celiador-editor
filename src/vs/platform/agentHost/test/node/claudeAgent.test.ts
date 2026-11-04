@@ -5821,12 +5821,12 @@ suite('ClaudeAgent', () => {
 			branchAbsent: properties['branch'] === undefined,
 		}, {
 			topLevelType: 'object',
-			propertyKeys: ['permissionMode', 'permissions', SessionConfigKey.SensitiveEditLocations].sort(),
+			propertyKeys: ['permissionMode', 'permissions', 'projectSettings', SessionConfigKey.SensitiveEditLocations].sort(),
 			permissionModeType: 'string',
 			permissionModeEnum: ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'],
 			permissionModeDefault: 'default',
 			permissionsType: 'object',
-			values: { permissionMode: 'default' },
+			values: { permissionMode: 'default', projectSettings: 'load' },
 			autoApproveAbsent: true,
 			modeAbsent: true,
 			isolationAbsent: true,
@@ -10973,6 +10973,45 @@ suite('ClaudeAgent — Phase 11 customizations', () => {
 		await agent.chats.sendMessage(chat, 'second', undefined, undefined, 'turn-2', undefined, undefined, chatContext(chat));
 
 		assert.deepStrictEqual(sdk.warmQueries.at(-1)?.produced?.recordedPermissionModes, ['bypassPermissions']);
+	});
+
+	test('Celiador: skipped repository settings start with the user source only and loading them relaunches (editor#28)', async () => {
+		const { agent, sdk, stateManager } = createTestContext(disposables);
+		await agent.authenticate(GITHUB_COPILOT_PROTECTED_RESOURCE.resource, 'tok');
+		const created = await createSession(agent, { workingDirectories: [URI.file('/work')], config: { permissionMode: 'default' } });
+		stateManager.createSession({
+			resource: created.session.toString(),
+			provider: agent.id,
+			title: '',
+			status: SessionStatus.Idle,
+			createdAt: new Date().toISOString(),
+			modifiedAt: new Date().toISOString(),
+			defaultChat: buildDefaultChatUri(created.session.toString()),
+		});
+		stateManager.setSessionConfig(created.session.toString(), {
+			schema: { type: 'object', properties: {} },
+			values: { permissionMode: 'default', projectSettings: 'skip' },
+		});
+		const chat = URI.parse(buildChatUri(created.session, 'chat-1'));
+		const result = await agent.chats.createChat(chat, created.session, { ...resolvedChatOptions() });
+		const additionalId = AgentSession.id(result!.backingSession!);
+		sdk.nextQueryMessages = [
+			makeSystemInitMessage(additionalId), makeResultSuccess(additionalId),
+			makeSystemInitMessage(additionalId), makeResultSuccess(additionalId),
+		];
+		await agent.chats.sendMessage(chat, 'first', undefined, undefined, 'turn-1', undefined, undefined, chatContext(chat));
+
+		stateManager.dispatchClientAction(created.session.toString(), {
+			type: ActionType.SessionConfigChanged,
+			config: { projectSettings: 'load' },
+		}, { clientId: 'notification', clientSeq: 1 });
+		await tick();
+		await agent.chats.sendMessage(chat, 'second', undefined, undefined, 'turn-2', undefined, undefined, chatContext(chat));
+
+		assert.deepStrictEqual(sdk.capturedStartupOptions.map(options => options.settingSources), [
+			['user'],
+			['user', 'project', 'local'],
+		]);
 	});
 
 	test('lazy chat materialization applies the latest persisted permission mode', async () => {

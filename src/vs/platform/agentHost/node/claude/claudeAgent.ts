@@ -27,7 +27,7 @@ import { IAgentSdkDownloader } from '../agentSdkDownloader.js';
 import { AgentSdkSetupChannel } from '../agentSdkSetupChannel.js';
 import { decodeProviderData, encodeProviderData, type IPersistedChat } from '../agentChatBackings.js';
 import { AgentHostAutoApprovePolicyRestrictedConfigKey, createSchema, platformRootSchema, platformSessionSchema, schemaProperty } from '../../common/agentHostSchema.js';
-import { ClaudePermissionMode, ClaudeSessionConfigKey, narrowClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
+import { ClaudePermissionMode, type ClaudeProjectSettings, ClaudeSessionConfigKey, narrowClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
 import { createClaudeThinkingLevelSchema, isClaudeEffortLevel } from '../../common/claudeModelConfig.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { AgentChatMigrationDeferred, type AgentChatMigrationResult, AgentProvider, AgentSession, resolveSessionBackedStorage, type IAgentChatOwnerRef, AgentSignal, CLAUDE_AGENT_PROVIDER_ID, IActiveClient, IAgent, IAgentListedChat, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, type IAgentChatMetadataOptions, IAgentChats, IAgentChatConfigCompletionsParams, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSessionProjectInfo, IAgentSpawnChatEvent, IAgentSpawnedChatParent, SubagentChatSignal, resolveAgentChatContext, resolveAgentHostCustomizations, resolveAgentHostInstructions, resolveSubagentChatParent } from '../../common/agent.js';
@@ -2445,12 +2445,31 @@ export class ClaudeAgent extends Disposable implements IAgent {
 				sessionMutable: true,
 				chatMutable: true,
 			}),
+			// Celiador (editor#28): the workbench sets `skip` for a folder trusted for the
+			// first time in this window; the chip is the one-click way back to `load`.
+			[ClaudeSessionConfigKey.ProjectSettings]: schemaProperty<ClaudeProjectSettings>({
+				type: 'string',
+				title: localize('claude.sessionConfig.projectSettings', "Repository Settings"),
+				description: localize('claude.sessionConfig.projectSettingsDescription', "Whether Claude loads this repository's own .claude settings, including hooks that run shell commands."),
+				enum: ['load', 'skip'],
+				enumLabels: [
+					localize('claude.sessionConfig.projectSettings.load', "Repository Settings"),
+					localize('claude.sessionConfig.projectSettings.skip', "User Settings Only"),
+				],
+				enumDescriptions: [
+					localize('claude.sessionConfig.projectSettings.loadDescription', "Load the repository's .claude settings, hooks, agents, skills, MCP servers and CLAUDE.md."),
+					localize('claude.sessionConfig.projectSettings.skipDescription', "Load only your own settings. Nothing from the repository's .claude folder runs."),
+				],
+				default: 'load',
+				sessionMutable: true,
+			}),
 			[SessionConfigKey.Permissions]: platformSessionSchema.definition[SessionConfigKey.Permissions],
 			[SessionConfigKey.SensitiveEditLocations]: platformSessionSchema.definition[SessionConfigKey.SensitiveEditLocations],
 		});
 
 		const values = sessionSchema.validateOrDefault(_params.config, {
 			[ClaudeSessionConfigKey.PermissionMode]: 'default' satisfies ClaudePermissionMode,
+			[ClaudeSessionConfigKey.ProjectSettings]: 'load' satisfies ClaudeProjectSettings, // Celiador
 			// Permissions intentionally omitted from defaults — leave
 			// unset so auto-approval falls through to the host-level
 			// default, materializing on the session only once the user

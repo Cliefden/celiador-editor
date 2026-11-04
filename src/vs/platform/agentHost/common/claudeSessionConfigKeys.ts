@@ -22,7 +22,30 @@
 export const enum ClaudeSessionConfigKey {
 	/** `'permissionMode'` — Claude SDK approval mode. */
 	PermissionMode = 'permissionMode',
+	/** `'projectSettings'` — whether the SDK loads the repository's own `.claude` settings (Celiador). */
+	ProjectSettings = 'projectSettings',
 }
+
+// --- Start Celiador ---
+/**
+ * Whether a Claude session loads the repository's own agent settings.
+ *
+ * - `'load'`: the SDK reads `settingSources: ['user', 'project', 'local']`, so
+ *   the repository's `.claude/settings.json`, `.claude/settings.local.json`,
+ *   `CLAUDE.md`, agents, skills and `.mcp.json` apply. Includes the `hooks`
+ *   block, which runs shell commands during the session.
+ * - `'skip'`: the SDK reads `settingSources: ['user']` only. Set by the
+ *   workbench for a session whose folder was trusted for the first time in
+ *   this window, where "trusted enough to open" and "trusted enough to run
+ *   its hooks" differ (editor#28). The user upgrades with one click.
+ */
+export type ClaudeProjectSettings = 'load' | 'skip';
+
+/** Narrow an arbitrary runtime value to {@link ClaudeProjectSettings}. */
+export function narrowClaudeProjectSettings(raw: unknown): ClaudeProjectSettings | undefined {
+	return raw === 'load' || raw === 'skip' ? raw : undefined;
+}
+// --- End Celiador ---
 
 /**
  * Permission-mode values advertised in the Claude session-config schema.

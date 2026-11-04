@@ -67,9 +67,9 @@
 	"builtInExtensions": [
 		{
 			"name": "GitHub.vscode-pull-request-github",
-			"version": "0.166.1",
-			"sha256": "898a1f264e5d49067815df5ba04f6340addeb89e55c949a2995c3181d8c05249",
-			"vsix": "build/builtin-vsix/GitHub.vscode-pull-request-github-0.166.1.vsix",
+			"version": "0.172.0",
+			"sha256": "d9d33f849416dab4aefdc5553bc89d02b193f8610e59a49b4cd61a5a0b2d5107",
+			"vsix": "build/builtin-vsix/GitHub.vscode-pull-request-github-0.172.0.vsix",
 			"repo": "https://github.com/microsoft/vscode-pull-request-github",
 			"metadata": {
 				"id": "69ddd764-339a-4ecc-97c1-9c4ece58e36d",
