@@ -35,6 +35,7 @@ export function resolveRealPathSync(fsPath: string, realpath: RealPathSync = rea
 	let current = fsPath;
 	for (;;) {
 		try {
+			// eslint-disable-next-line local/code-no-sync-fs -- The protected-edit decision is synchronous; one realpath per file edit the agent proposes.
 			const resolved = realpath(current);
 			return tail.length ? join(resolved, ...tail) : resolved;
 		} catch (e) {
