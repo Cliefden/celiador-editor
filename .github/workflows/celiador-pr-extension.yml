@@ -1,8 +1,9 @@
 name: Celiador PR (celiador-ai)
 
 # Checks for the built-in celiador-ai extension: compile (tsc, which is the
-# type check) and the node:test unit tests. The extension has its own lockfile,
-# so this needs no root install and takes about a minute on a hosted runner.
+# type check) and the node:test unit tests. The extension is a member of the
+# root pnpm workspace; a filtered install fetches only its own dependencies, so
+# this needs no full root install and takes about a minute on a hosted runner.
 
 on:
   pull_request:
@@ -11,11 +12,13 @@ on:
       - 'extensions/tsconfig.base.json'
       - 'src/vscode-dts/vscode.d.ts'
       - 'src/vscode-dts/vscode.proposed.authIssuers.d.ts'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/celiador-pr-extension.yml'
   push:
     branches: [main]
     paths:
       - 'extensions/celiador-ai/**'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/celiador-pr-extension.yml'
 
 concurrency:
@@ -39,8 +42,12 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      # The extension's dependencies (tsc, test runners) need no install scripts.
       - name: Install extension dependencies
-        run: npm ci --prefix extensions/celiador-ai
+        run: pnpm install --frozen-lockfile --filter celiador-ai --ignore-scripts
 
       - name: Compile and run unit tests
-        run: npm --prefix extensions/celiador-ai run test:unit
+        run: pnpm -C extensions/celiador-ai run test:unit

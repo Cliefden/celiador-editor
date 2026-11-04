@@ -92,7 +92,7 @@ Locally (same Mac as the runner):
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  fnm exec --using 24.18.0 npm run gulp vscode-darwin-arm64-min
+  fnm exec --using 24.22.1 corepack pnpm run gulp vscode-darwin-arm64-min
 build/celiador/release-macos.sh --notes "Fixes the phone transcript." --publish
 ```
 

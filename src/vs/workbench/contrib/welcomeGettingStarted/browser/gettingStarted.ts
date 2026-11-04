@@ -20,6 +20,7 @@ import { KeyCode } from '../../../../base/common/keyCodes.js';
 import { splitRecentLabel } from '../../../../base/common/labels.js';
 import { DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { ILink, LinkedText } from '../../../../base/common/linkedText.js';
+import { observableValue } from '../../../../base/common/observable.js';
 import { parse } from '../../../../base/common/marshalling.js';
 import { Schemas, matchesScheme } from '../../../../base/common/network.js';
 import { OS } from '../../../../base/common/platform.js';
@@ -116,6 +117,16 @@ type GettingStartedActionEvent = {
 
 type RecentEntry = (IRecentFolder | IRecentWorkspace) & { id: string };
 
+/**
+ * Sets the classes through which the page's CSS lays out the Agents window graphic: shown with room
+ * to spare, shown with tighter spacing, or dropped so that only the Agents window button is shown.
+ */
+function setAgentsWindowGraphicLayout(categoriesContainer: HTMLElement, layout: 'spacious' | 'compact' | 'dropped' | undefined): void {
+	categoriesContainer.classList.toggle('agents-window-graphic-shown', layout === 'spacious' || layout === 'compact');
+	categoriesContainer.classList.toggle('agents-window-graphic-spacious', layout === 'spacious');
+	categoriesContainer.classList.toggle('agents-window-graphic-dropped', layout === 'dropped');
+}
+
 const REDUCED_MOTION_KEY = 'workbench.welcomePage.preferReducedMotion';
 export class GettingStartedPage extends EditorPane {
 
@@ -162,6 +173,8 @@ export class GettingStartedPage extends EditorPane {
 	private detailsRenderer: GettingStartedDetailsRenderer;
 
 	private readonly categoriesSlideDisposables: DisposableStore;
+	private readonly categoriesSlideShown = observableValue<boolean>(this, false);
+	private layoutAgentsWindowGraphic: (() => void) | undefined;
 	private showFeaturedWalkthrough = true;
 
 	get editorInput(): GettingStartedInput | undefined {
@@ -944,6 +957,9 @@ export class GettingStartedPage extends EditorPane {
 		));
 
 		const footer = $('.footer', {}, ...footerChildren);
+		const categoriesContainer = $('.gettingStartedCategoriesContainer', {}, header, leftColumn, rightColumn, footer,);
+		// Celiador: no Agents banner, so there is never a graphic to fit.
+		const layoutAgentsWindowGraphic = () => this.fitAgentsWindowGraphic(categoriesContainer, false);
 
 		const layoutLists = () => {
 			if (gettingStartedList.itemCount) {
@@ -956,6 +972,7 @@ export class GettingStartedPage extends EditorPane {
 			}
 			setTimeout(() => this.categoriesPageScrollbar?.scanDomNode(), 50);
 			layoutRecentList();
+			layoutAgentsWindowGraphic();
 		};
 
 		const layoutRecentList = () => {
@@ -970,10 +987,15 @@ export class GettingStartedPage extends EditorPane {
 		};
 
 		gettingStartedList.onDidChange(layoutLists);
+		recentList.onDidChange(layoutAgentsWindowGraphic);
 		layoutLists();
 
-		reset(this.categoriesSlide, $('.gettingStartedCategoriesContainer', {}, header, leftColumn, rightColumn, footer,));
+		reset(this.categoriesSlide, categoriesContainer);
 		this.categoriesPageScrollbar?.scanDomNode();
+
+		layoutAgentsWindowGraphic();
+		this.layoutAgentsWindowGraphic = layoutAgentsWindowGraphic;
+		this.categoriesSlideDisposables.add(toDisposable(() => this.layoutAgentsWindowGraphic = undefined));
 
 		this.updateCategoryProgress();
 		this.registerDispatchListeners();
@@ -1002,6 +1024,7 @@ export class GettingStartedPage extends EditorPane {
 			const telemetryNotice = $('p.telemetry-notice');
 			this.buildTelemetryFooter(telemetryNotice);
 			footer.appendChild(telemetryNotice);
+			layoutAgentsWindowGraphic();
 		} else if (!this.productService.openToWelcomeMainPage && this.showFeaturedWalkthrough && this.storageService.isNew(StorageScope.APPLICATION) && !this.configurationService.getValue<boolean>('workbench.welcomePage.experimentalOnboarding')) {
 			const firstSessionDateString = this.storageService.get(firstSessionDateStorageKey, StorageScope.APPLICATION) || new Date().toUTCString();
 			const daysSinceFirstSession = ((+new Date()) - (+new Date(firstSessionDateString))) / 1000 / 60 / 60 / 24;
@@ -1273,10 +1296,34 @@ export class GettingStartedPage extends EditorPane {
 		this.container.classList.toggle('height-constrained', size.height <= 600);
 		this.container.classList.toggle('width-constrained', size.width <= 400);
 		this.container.classList.toggle('width-semi-constrained', size.width <= 950);
+		this.layoutAgentsWindowGraphic?.();
 
 		this.categoriesPageScrollbar?.scanDomNode();
 		this.detailsPageScrollbar?.scanDomNode();
 		this.detailsScrollbar.value?.scanDomNode();
+	}
+
+	/**
+	 * Shows the Agents window graphic above the Agents window button only if the page then fits without
+	 * scrolling. With room to spare, the graphic and button are set apart from the startup checkbox.
+	 * Otherwise tighter spacing makes room for the graphic, and if that isn't enough only the button is shown.
+	 */
+	private fitAgentsWindowGraphic(categoriesContainer: HTMLElement, graphicAvailable: boolean): void {
+		let layout: 'spacious' | 'compact' | 'dropped' | undefined;
+		if (graphicAvailable) {
+			layout = 'dropped';
+			if (categoriesContainer.isConnected && this.categoriesSlide.clientHeight > 0) {
+				for (const candidate of ['spacious', 'compact'] as const) {
+					setAgentsWindowGraphicLayout(categoriesContainer, candidate);
+					if (this.categoriesSlide.scrollHeight <= this.categoriesSlide.clientHeight) {
+						layout = candidate;
+						break;
+					}
+				}
+			}
+		}
+		setAgentsWindowGraphicLayout(categoriesContainer, layout);
+		this.categoriesPageScrollbar?.scanDomNode();
 	}
 
 	private updateCategoryProgress() {
@@ -1715,6 +1762,7 @@ export class GettingStartedPage extends EditorPane {
 	private setSlide(toEnable: 'details' | 'categories', firstLaunch: boolean = false) {
 		// eslint-disable-next-line no-restricted-syntax
 		const slideManager = assertReturnsDefined(this.container.querySelector('.gettingStarted'));
+		this.categoriesSlideShown.set(toEnable === 'categories', undefined);
 		if (toEnable === 'categories') {
 			slideManager.classList.remove('showDetails');
 			slideManager.classList.add('showCategories');

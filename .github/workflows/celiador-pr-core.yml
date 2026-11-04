@@ -14,9 +14,10 @@ on:
       - 'build/**'
       - 'test/unit/**'
       - 'package.json'
-      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.pnpmfile.mjs'
       - '.nvmrc'
-      - '.npmrc'
       - '.github/workflows/celiador-pr-core.yml'
   push:
     branches: [main]
@@ -25,9 +26,10 @@ on:
       - 'build/**'
       - 'test/unit/**'
       - 'package.json'
-      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.pnpmfile.mjs'
       - '.nvmrc'
-      - '.npmrc'
       - '.github/workflows/celiador-pr-core.yml'
 
 concurrency:
@@ -57,6 +59,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
       - name: Install system dependencies
         run: |
           set -e
@@ -71,25 +76,15 @@ jobs:
           key-prefix: celiador-node_modules-pr-linux
           key-args: "linux x64 $(node -p process.arch)"
 
-      - name: Install build dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        working-directory: build
-        run: |
-          set -e
-          for i in {1..5}; do
-            npm ci && break
-            if [ "$i" -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
-            echo "npm ci failed $i, trying again..."
-          done
-
+      # One install: the root postinstall also installs the build/ and remote/ roots.
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: |
           set -e
           for i in {1..5}; do
-            npm ci && break
-            if [ "$i" -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
-            echo "npm ci failed $i, trying again..."
+            pnpm install --frozen-lockfile && break
+            if [ "$i" -eq 5 ]; then echo "pnpm install failed too many times" >&2; exit 1; fi
+            echo "pnpm install failed $i, trying again..."
           done
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
@@ -112,19 +107,19 @@ jobs:
             exit 0
           fi
           printf '%s\n' "${files[@]}"
-          npm run eslint -- "${files[@]}"
+          pnpm run eslint "${files[@]}"
 
       - name: Typecheck client
-        run: npm run typecheck-client
+        run: pnpm run typecheck-client
 
       - name: Build client
-        run: npm run build-fast -- --client-only
+        run: pnpm run build-fast --client-only
 
       - name: agentHost node unit tests
-        run: npm run test-node -- --runGlob "vs/platform/agentHost/test/{common,node}/**/*.test.js"
+        run: pnpm run test-node --runGlob "vs/platform/agentHost/test/{common,node}/**/*.test.js"
 
       - name: Install Chromium for browser tests
-        run: npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: agentHost browser unit tests
         run: node test/unit/browser/index.js --browser chromium --runGlob "vs/workbench/contrib/chat/test/browser/agentSessions/agentHost/*.test.js"
