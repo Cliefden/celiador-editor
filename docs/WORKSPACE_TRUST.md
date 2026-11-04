@@ -61,8 +61,8 @@ fail closed.
   (`settingSources: user, project, local`), so a repository can define SDK
   hooks that run shell commands during a session. Trust is the boundary: those
   only run once the user has trusted the folder, and the agent cannot change
-  them without a prompt. Narrowing `settingSources` for untrusted-origin repos
-  is a follow-up if dogfooding shows a need.
+  them without a prompt. A folder trusted for the first time in this window
+  now starts with `settingSources: ['user']` (see below, editor#28).
 - Bash is not path-aware: `echo > .vscode/tasks.json` is governed by the shell
   rules (`sed -i` and redirects to denied destinations require confirmation),
   not by the edit patterns.
@@ -93,3 +93,12 @@ first, by design, commit b049a8623ca), the agent-host trust gate, and "Run on
 your editor" — the phone can only start a run for a repository this window
 already has open, so trust was decided by the user at the keyboard. Still out
 of scope, as above: `bypassPermissions` ("Allow All") and shell redirects.
+
+## Repository settings of a newly trusted folder (editor#28)
+
+"Trusted enough to open" and "trusted enough to run its hooks" differ for a fresh clone from a stranger, so a Claude session whose folder was trusted for the first time in this window starts with the user's own settings only.
+
+- **When.** On the first turn of a new Claude session, if this send's trust prompt was answered with Trust, or the folder (or a parent) was added to the trusted folders, or the window's workspace went from untrusted to trusted, since the window opened (`CeliadorRepoSettingsTrustService`, which diffs `getTrustedUris()` and watches `onDidChangeTrust`). A folder trusted in an earlier window keeps the upstream behaviour. Other providers are untouched.
+- **What.** The handler sets the Claude session-config key `projectSettings: 'skip'`, which the agent host turns into `settingSources: ['user']` instead of `['user', 'project', 'local']`. Skipped: the repository's `.claude/settings.json` and `settings.local.json` (hooks, `apiKeyHelper`, `statusLine` and other helper commands, permissions), `CLAUDE.md`, `.claude/agents`, skills, commands and `.mcp.json`. The value is session config, so it persists with the session.
+- **Upgrade.** If the repository has any of `.claude/`, `CLAUDE.md`, `CLAUDE.local.md` or `.mcp.json`, a notification names up to three commands its settings would run and offers "Load Repository Settings". The "Repository Settings" chip in the chat input does the same. Either sets `projectSettings: 'load'`; `settingSources` is fixed at SDK startup, so the session relaunches (resume) on the next message.
+- **Not covered.** Customizations the workbench pushes to the SDK as local plugins travel through `Options.plugins`, not `settingSources`, and are not narrowed. The "Discovered in Claude" hook list still shows the repository's hooks while they are skipped.
