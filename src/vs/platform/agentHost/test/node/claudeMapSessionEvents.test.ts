@@ -163,6 +163,23 @@ suite('claudeMapSessionEvents — direct mapper tests', () => {
 		assert.strictEqual(meta?.chatError?.fetchError?.type, 'quotaExceeded');
 	});
 
+	test('successful result is_error reports the generic error type, not "success" (Celiador)', () => {
+		const result = makeResultSuccess(SESSION_ID);
+		const signals = mapSDKMessageToAgentSignals(
+			{ ...result, is_error: true, result: 'API Error: 500 Internal Server Error' },
+			SESSION,
+			TURN_ID,
+			new ClaudeMapperState(),
+			new NullLogService(),
+			r(),
+		);
+
+		const errorSignal = signals.find(s => s.kind === 'action' && s.action.type === ActionType.ChatError);
+		assert.ok(errorSignal && errorSignal.kind === 'action' && errorSignal.action.type === ActionType.ChatError);
+		const { errorType, message } = errorSignal.action.part.error;
+		assert.deepStrictEqual({ errorType, message }, { errorType: 'error', message: 'API Error: 500 Internal Server Error' });
+	});
+
 	test('text content block: start emits ChatResponsePart, deltas emit ChatDelta', () => {
 		const out: AgentSignal[] = [];
 		const log = new NullLogService();

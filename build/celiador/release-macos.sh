@@ -32,6 +32,11 @@
 #                           envs/<test|dev>/daemon/releases otherwise)
 #   --manifest-url <url>    current manifest, merged before writing
 #                           (default https://<channel host>/api/releases)
+#   --installed <app>       the app this Mac runs (default /Applications/<bundle name>)
+#   --check-installed       only check that the installed app contains --app's commit
+#                           (same commit, or a descendant in this checkout's history),
+#                           and that the updater can replace it; exit 1 otherwise.
+#                           A full release run prints the same check at the end.
 #
 # Needs: Xcode command line tools (codesign, ditto, hdiutil, stapler), node, rsync, and
 # `asc` signed in (notarization goes through the App Store Connect API key: `asc auth status`).
@@ -56,6 +61,8 @@ RELEASE_HOST="${CELIADOR_RELEASE_HOST:-cliefden.com}"
 RELEASE_DIR="${CELIADOR_RELEASE_DIR:-}"
 PLATFORM="darwin-arm64"
 ENT="$ROOT/build/azure-pipelines/darwin"
+INSTALLED=""
+CHECK_INSTALLED_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -68,7 +75,9 @@ while [[ $# -gt 0 ]]; do
     --skip-notarize) SKIP_NOTARIZE=1; shift ;;
     --publish) PUBLISH=1; shift ;;
     --manifest-url) MANIFEST_URL="$2"; shift 2 ;;
-    -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    --installed) INSTALLED="$2"; shift 2 ;;
+    --check-installed) CHECK_INSTALLED_ONLY=1; shift ;;
+    -h|--help) sed -n '/^set -e/q;2,$p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "error: unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -77,6 +86,52 @@ log() { printf '\n==> %s\n' "$*"; }
 die() { echo "error: $*" >&2; exit 1; }
 
 [[ -d "$APP" ]] || die "no app at $APP (build it first: npm run gulp vscode-darwin-arm64-min)"
+INSTALLED="${INSTALLED:-/Applications/$(basename "$APP")}"
+
+# Is the app this Mac actually runs the build with the fixes? Testing an older
+# /Applications copy (the updater could not replace a root-owned bundle) has
+# already cost a debugging session (editor#85). Returns 0 when the installed
+# app is <commit> or a descendant of it in this checkout's history, 1 when it
+# is not, 2 when it is but the updater cannot replace it.
+check_installed() { # check_installed <commit>
+  local want="$1" product="$INSTALLED/Contents/Resources/app/product.json" have ok=1
+  if [[ ! -f "$product" ]]; then
+    echo "    no Celiador installed at $INSTALLED"
+    return 1
+  fi
+  have="$(node -p 'require(process.argv[1]).commit || ""' "$product")"
+  if [[ -z "$have" ]]; then
+    echo "    $INSTALLED has no commit in its product.json (a dev build?)"
+  elif [[ "$have" == "$want" ]]; then
+    echo "    $INSTALLED is this build (${want:0:7})"
+    ok=0
+  elif git -C "$ROOT" merge-base --is-ancestor "$want" "$have" 2>/dev/null; then
+    echo "    $INSTALLED is ${have:0:7}, which already contains ${want:0:7}"
+    ok=0
+  else
+    echo "    $INSTALLED is ${have:0:7}, which does NOT contain ${want:0:7} (or that commit is not in this checkout)"
+  fi
+  # Squirrel.Mac replaces the bundle as the signed-in user; it cannot if root owns it.
+  if [[ ! -w "$INSTALLED" ]]; then
+    echo "    warning: $INSTALLED is not writable by $(id -un), so the built-in updater cannot replace it"
+    echo "             (fix: sudo chown -R $(id -un) \"$INSTALLED\")"
+    [[ $ok -eq 0 ]] && ok=2
+  fi
+  return $ok
+}
+
+if [[ $CHECK_INSTALLED_ONLY -eq 1 ]]; then
+  WANT="$(node -p 'require(process.argv[1]).commit || ""' "$APP/Contents/Resources/app/product.json")"
+  [[ "$WANT" =~ ^[0-9a-f]{40}$ ]] || die "$APP has no commit in its product.json (is this a gulp -min build?)"
+  log "Checking the installed app against ${WANT:0:7} ($APP)"
+  status=0
+  check_installed "$WANT" || status=$?
+  case $status in
+    0) exit 0 ;;
+    2) die "the installed app has these changes, but later updates will not apply until its ownership is fixed" ;;
+    *) die "the installed app is not the build with these changes — install it (DMG or Check for Updates) before testing" ;;
+  esac
+fi
 for tool in codesign ditto hdiutil node rsync; do
   command -v "$tool" >/dev/null || die "$tool not found"
 done
@@ -302,5 +357,13 @@ if [[ $PUBLISH -eq 1 ]]; then
 fi
 
 rm -rf "$STAGE"
+
+# Informational: a release does not install itself. Before testing the fixes on
+# this Mac, update the installed app until this check passes (--check-installed).
+log "Installed app"
+status=0
+check_installed "$COMMIT" || status=$?
+[[ $status -eq 1 ]] && echo "    → install $NAME.dmg (or Check for Updates) before testing this release here"
+
 log "Done: $OUT"
 ls -la "$OUT"

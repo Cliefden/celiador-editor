@@ -108,6 +108,14 @@ curl -sI https://celiador.ai/api/update/darwin-arm64/stable/<previous commit>   
 curl -sI https://celiador.ai/api/update/darwin-arm64/stable/<this commit>       # 204 → up to date
 ```
 
+Before testing the release on this Mac, make sure `/Applications` actually runs it. The release run ends with this check; run it alone with:
+
+```sh
+build/celiador/release-macos.sh --check-installed   # exit 0: installed app is this commit (or newer)
+```
+
+It also fails when the installed bundle is not writable by you (for example root-owned after a `sudo` copy): the built-in updater cannot replace such a bundle, so later releases would silently never arrive.
+
 ## Channels
 
 The same pipeline cuts the test and dev channels (`CHANNELS.md`): run
