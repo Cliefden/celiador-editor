@@ -151,6 +151,10 @@
 			"project": "vscode-workbench"
 		},
 		{
+			"name": "vs/workbench/contrib/mediaPreview",
+			"project": "vscode-workbench"
+		},
+		{
 			"name": "vs/workbench/contrib/mergeEditor",
 			"project": "vscode-workbench"
 		},
@@ -196,6 +200,10 @@
 		},
 		{
 			"name": "vs/workbench/contrib/chat",
+			"project": "vscode-workbench"
+		},
+		{
+			"name": "vs/workbench/contrib/chatWindow",
 			"project": "vscode-workbench"
 		},
 		{
@@ -725,6 +733,10 @@
 			"project": "vscode-sessions"
 		},
 		{
+			"name": "vs/sessions/contrib/chatWindow",
+			"project": "vscode-sessions"
+		},
+		{
 			"name": "vs/sessions/contrib/providers/copilotChatSessions",
 			"project": "vscode-sessions"
 		},
@@ -766,6 +778,10 @@
 		},
 		{
 			"name": "vs/sessions/contrib/github",
+			"project": "vscode-sessions"
+		},
+		{
+			"name": "vs/sessions/contrib/inboxOne",
 			"project": "vscode-sessions"
 		},
 		{
@@ -826,6 +842,14 @@
 		},
 		{
 			"name": "vs/sessions/contrib/onboardingTours",
+			"project": "vscode-sessions"
+		},
+		{
+			"name": "vs/sessions/contrib/getStarted",
+			"project": "vscode-sessions"
+		},
+		{
+			"name": "vs/sessions/contrib/worktreeSuggestion",
 			"project": "vscode-sessions"
 		}
 	]

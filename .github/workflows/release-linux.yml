@@ -61,6 +61,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
       - name: Install system dependencies
         run: |
           set -e
@@ -82,9 +85,9 @@ jobs:
         run: |
           set -e
           for i in {1..5}; do
-            npm ci && break
-            if [ $i -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
-            echo "npm ci failed $i, trying again..."
+            pnpm install --frozen-lockfile && break
+            if [ $i -eq 5 ]; then echo "pnpm install failed too many times" >&2; exit 1; fi
+            echo "pnpm install failed $i, trying again..."
           done
 
       - name: Install dependencies
@@ -95,9 +98,9 @@ jobs:
           # and the .deb/.rpm dependency lists match build/linux/*/dep-lists.ts.
           source ./build/azure-pipelines/linux/setup-env.sh
           for i in {1..5}; do
-            npm ci && break
-            if [ $i -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
-            echo "npm ci failed $i, trying again..."
+            pnpm install --frozen-lockfile && break
+            if [ $i -eq 5 ]; then echo "pnpm install failed too many times" >&2; exit 1; fi
+            echo "pnpm install failed $i, trying again..."
           done
         env:
           npm_config_arch: ${{ env.NPM_ARCH }}
@@ -116,7 +119,7 @@ jobs:
         run: node build/lib/builtInExtensions.ts
 
       - name: Build app
-        run: npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-min
+        run: pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-min
 
       - name: Verify the AI extension actually compiled
         run: |
@@ -136,10 +139,10 @@ jobs:
       - name: Build .deb and .rpm
         run: |
           set -e
-          npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-prepare-deb
-          npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-build-deb
-          npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-prepare-rpm
-          npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-build-rpm
+          pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-prepare-deb
+          pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-build-deb
+          pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-prepare-rpm
+          pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-build-rpm
 
       - name: Collect packages
         run: |

@@ -12,7 +12,8 @@ Celiador turns GitHub issues into pull requests. Label an issue `celiador` and a
 
 | Tool | Version / note |
 |------|----------------|
-| Node | **24.18.0** (matches vscode's `.nvmrc`) — via [`fnm`](https://github.com/Schniz/fnm): `fnm exec --using 24.18.0 <cmd>` |
+| Node | **24.22.1** (matches vscode's `.nvmrc`) — via [`fnm`](https://github.com/Schniz/fnm): `fnm exec --using 24.22.1 <cmd>` |
+| pnpm | the version `packageManager` in `package.json` pins (12.x); `corepack pnpm` picks it. Never install with npm. |
 | Xcode | `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer` is **required** for native-module (`node-gyp`) builds |
 | jq | any recent version |
 
@@ -21,11 +22,11 @@ Celiador turns GitHub issues into pull requests. Label an issue `celiador` and a
 ```sh
 # 1. install dependencies (native modules build here — hence DEVELOPER_DIR)
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  fnm exec --using 24.18.0 npm install
+  fnm exec --using 24.22.1 corepack pnpm install
 
 # 2. package the desktop app
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  fnm exec --using 24.18.0 npm run gulp vscode-darwin-arm64-min
+  fnm exec --using 24.22.1 corepack pnpm run gulp vscode-darwin-arm64-min
 ```
 
 The packaged app is written **one level up** from this repo (vscode's `buildRoot` is the parent dir):

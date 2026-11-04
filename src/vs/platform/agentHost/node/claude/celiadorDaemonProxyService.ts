@@ -52,6 +52,7 @@ export interface ICeliadorDaemonProxyHandle extends ILoopbackProxyHandle {
 	 * daemon attribute its usage to the relay session the phone sees (contract §1).
 	 * The key is read per request, since a chat's owning session can change.
 	 */
+	// eslint-disable-next-line local/code-prefer-event-or-observable -- A value getter the proxy reads per request, not a notification.
 	setSessionMirror(sessionId: string, mirrorKey: (() => string | undefined) | undefined): void;
 }
 

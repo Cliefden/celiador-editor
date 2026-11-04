@@ -211,10 +211,10 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile",
-    "pretest": "npm run compile",
+    "vscode:prepublish": "pnpm run compile",
+    "pretest": "pnpm run compile",
     "test": "node ./out/test/runTest.js",
-    "test:unit": "npm run compile && node --test out/test/unit/*.test.js"
+    "test:unit": "tsc -p ./ && node --test out/test/unit/*.test.js"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",

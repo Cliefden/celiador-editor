@@ -7,12 +7,11 @@ import { Disposable, DisposableStore } from '../../../../../../base/common/lifec
 import { Event } from '../../../../../../base/common/event.js';
 import { createCommandUri, escapeMarkdownSyntaxTokens, IMarkdownString, MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { localize } from '../../../../../../nls.js';
-import { AgentHostAllowSignedOutWhenUsableSettingId, IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
+import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { LOCAL_AGENT_HOST_SCHEME_PREFIX } from '../../../../../../platform/agentHost/common/agentHostConnectionsService.js';
 import type { AgentSdkDownloadStatus, IAgentSdkSetupInfo } from '../../../../../../platform/agentHost/common/agentSdkSetup.js';
 import type { RootState } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { CommandsRegistry } from '../../../../../../platform/commands/common/commands.js';
-import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IDefaultAccountService } from '../../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { ServicesAccessor } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -29,8 +28,6 @@ import { ILanguageModelsService } from '../../../common/languageModels.js';
 
 /** Everything one agent's {@link AgentSdkSetupState} is decided from. */
 export interface IAgentSdkSetupStateInputs {
-	/** The experimentation flag the missing-account routes stay behind. Not the download offer. */
-	readonly allowSignedOutWhenUsable: boolean;
 	/** Whether the user is signed in to GitHub (the shared Copilot route is already configured). */
 	readonly signedIn: boolean;
 	/** Whether entitlement has settled; before that "signed out" is not yet a fact. */
@@ -61,8 +58,7 @@ export function getAgentSdkSetupState(inputs: IAgentSdkSetupStateInputs): AgentS
 	if (inputs.download === 'downloadOnUse' || inputs.download === 'downloading') {
 		return undefined;
 	}
-	// Missing-account guidance requires an existing Copilot account or the signed-out opt-in.
-	if (!inputs.entitlementResolved || (!inputs.signedIn && !inputs.allowSignedOutWhenUsable)) {
+	if (!inputs.entitlementResolved) {
 		return undefined;
 	}
 	if (inputs.hasModels) {
@@ -319,7 +315,6 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 		@IAgentSdkSetupService private readonly _agentSdkSetupService: IAgentSdkSetupService,
 		@IDefaultAccountService private readonly _defaultAccountService: IDefaultAccountService,
 		@ILanguageModelsService private readonly _languageModelsService: ILanguageModelsService,
-		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IChatEntitlementService private readonly _chatEntitlementService: IChatEntitlementService,
 		@IAgentHostService private readonly _agentHostService: IAgentHostService,
 		@ICodexAccountService private readonly _codexAccountService: ICodexAccountService,
@@ -333,7 +328,6 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 			this._defaultAccountService.onDidChangeDefaultAccount,
 			this._languageModelsService.onDidChangeLanguageModels,
 			this._codexAccountService.onDidChangeAccount,
-			Event.filter(this._configurationService.onDidChangeConfiguration, event => event.affectsConfiguration(AgentHostAllowSignedOutWhenUsableSettingId)),
 			// Celiador: the account that matters here is the Celiador one.
 			Event.filter(this._contextKeyService.onDidChangeContext, event => event.affectsSome(CELIADOR_SIGNED_IN_CONTEXT_KEYS)),
 		)(() => this._update()));
@@ -353,10 +347,9 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 		// Celiador: there is no Copilot entitlement to wait for and no GitHub account to
 		// require. "Signed in" means signed in to Celiador (`celiador.signedIn`, set by
 		// the celiador-ai auth provider); signed out, the banner must still render — it
-		// is the sign-in route — so the signed-out opt-in is treated as on.
+		// is the sign-in route.
 		const isCeliador = this._productService.nameShort !== 'Code - OSS';
 		const celiadorSignedIn = isCeliador && this._contextKeyService.getContextKeyValue<boolean>(CELIADOR_SIGNED_IN_CONTEXT_KEY) === true;
-		const allowSignedOutWhenUsable = isCeliador || this._configurationService.getValue<boolean>(AgentHostAllowSignedOutWhenUsableSettingId) === true;
 		const entitlement = this._chatEntitlementService.entitlement;
 		const entitlementResolved = isCeliador || entitlement !== ChatEntitlement.Unresolved;
 		const signedIn = celiadorSignedIn
@@ -382,7 +375,6 @@ export class AgentHostSdkSetupNotificationContribution extends Disposable implem
 						? 'available'
 						: 'unresolved';
 			const state = getAgentSdkSetupState({
-				allowSignedOutWhenUsable,
 				signedIn,
 				entitlementResolved,
 				download: setup.download,

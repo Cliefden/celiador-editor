@@ -76,6 +76,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
       - name: Install system dependencies
         run: |
           set -e
@@ -97,9 +100,9 @@ jobs:
         run: |
           set -e
           for i in {1..5}; do
-            npm ci && break
-            if [ $i -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
-            echo "npm ci failed $i, trying again..."
+            pnpm install --frozen-lockfile && break
+            if [ $i -eq 5 ]; then echo "pnpm install failed too many times" >&2; exit 1; fi
+            echo "pnpm install failed $i, trying again..."
           done
 
       - name: Install dependencies
@@ -110,9 +113,9 @@ jobs:
           # and the .deb/.rpm dependency lists match build/linux/*/dep-lists.ts.
           source ./build/azure-pipelines/linux/setup-env.sh
           for i in {1..5}; do
-            npm ci && break
-            if [ $i -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
-            echo "npm ci failed $i, trying again..."
+            pnpm install --frozen-lockfile && break
+            if [ $i -eq 5 ]; then echo "pnpm install failed too many times" >&2; exit 1; fi
+            echo "pnpm install failed $i, trying again..."
           done
         env:
           npm_config_arch: ${{ env.NPM_ARCH }}
@@ -136,19 +139,19 @@ jobs:
         run: node build/lib/builtInExtensions.ts
 
       - name: Build app
-        run: npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-min
+        run: pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-min
 
       - name: Build .deb
         run: |
           set -e
-          npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-prepare-deb
-          npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-build-deb
+          pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-prepare-deb
+          pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-build-deb
 
       - name: Build .rpm
         run: |
           set -e
-          npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-prepare-rpm
-          npm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-build-rpm
+          pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-prepare-rpm
+          pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-build-rpm
 
       - name: Collect packages
         run: |
@@ -194,6 +197,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
       - name: Restore node_modules cache
         id: cache-node-modules
         uses: ./.github/actions/restore-node-modules
@@ -213,12 +219,12 @@ jobs:
 
           for ($i = 1; $i -le 5; $i++) {
             try {
-              exec { npm ci }
+              exec { pnpm install --frozen-lockfile }
               break
             }
             catch {
-              if ($i -eq 5) { Write-Error "npm ci failed after 5 attempts"; throw }
-              Write-Host "npm ci failed attempt $i, retrying..."
+              if ($i -eq 5) { Write-Error "pnpm install failed after 5 attempts"; throw }
+              Write-Host "pnpm install failed attempt $i, retrying..."
               Start-Sleep -Seconds 2
             }
           }
@@ -236,15 +242,15 @@ jobs:
         run: node build/lib/builtInExtensions.ts
 
       - name: Build app
-        run: npm run gulp vscode-win32-${{ env.VSCODE_ARCH }}-min
+        run: pnpm run gulp vscode-win32-${{ env.VSCODE_ARCH }}-min
 
       - name: Build installers
         run: |
-          npm run gulp vscode-win32-${{ env.VSCODE_ARCH }}-inno-updater
+          pnpm run gulp vscode-win32-${{ env.VSCODE_ARCH }}-inno-updater
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npm run gulp vscode-win32-${{ env.VSCODE_ARCH }}-user-setup
+          pnpm run gulp vscode-win32-${{ env.VSCODE_ARCH }}-user-setup
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npm run gulp vscode-win32-${{ env.VSCODE_ARCH }}-system-setup
+          pnpm run gulp vscode-win32-${{ env.VSCODE_ARCH }}-system-setup
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Collect packages
@@ -291,6 +297,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
       - name: Restore node_modules cache
         id: cache-node-modules
         uses: ./.github/actions/restore-node-modules
@@ -305,9 +314,9 @@ jobs:
           # node-gyp needs setuptools on Python 3.12+; Xcode's older pip has no --break-system-packages.
           python3 -m pip install --break-system-packages setuptools 2>/dev/null || python3 -m pip install --user setuptools || echo "setuptools not installed; continuing"
           for i in {1..5}; do
-            npm ci && break
-            if [ $i -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
-            echo "npm ci failed $i, trying again..."
+            pnpm install --frozen-lockfile && break
+            if [ $i -eq 5 ]; then echo "pnpm install failed too many times" >&2; exit 1; fi
+            echo "pnpm install failed $i, trying again..."
           done
         env:
           npm_config_arch: ${{ env.NPM_ARCH }}
@@ -324,7 +333,7 @@ jobs:
         run: node build/lib/builtInExtensions.ts
 
       - name: Build app
-        run: npm run gulp vscode-darwin-${{ env.VSCODE_ARCH }}-min
+        run: pnpm run gulp vscode-darwin-${{ env.VSCODE_ARCH }}-min
 
       - name: Sign and package
         env:

@@ -82,6 +82,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
       - name: Restore node_modules cache
         id: cache-node-modules
         uses: ./.github/actions/restore-node-modules
@@ -96,9 +99,9 @@ jobs:
           # node-gyp needs setuptools on Python 3.12+; Xcode's older pip has no --break-system-packages.
           python3 -m pip install --break-system-packages setuptools 2>/dev/null || python3 -m pip install --user setuptools || echo "setuptools not installed; continuing"
           for i in {1..5}; do
-            npm ci && break
-            if [ $i -eq 5 ]; then echo "npm ci failed too many times" >&2; exit 1; fi
-            echo "npm ci failed $i, trying again..."
+            pnpm install --frozen-lockfile && break
+            if [ $i -eq 5 ]; then echo "pnpm install failed too many times" >&2; exit 1; fi
+            echo "pnpm install failed $i, trying again..."
           done
         env:
           npm_config_arch: ${{ env.NPM_ARCH }}
@@ -121,7 +124,7 @@ jobs:
         run: build/celiador/channel.sh "${{ inputs.channel || 'prod' }}"
 
       - name: Build app
-        run: npm run gulp vscode-darwin-${{ env.VSCODE_ARCH }}-min
+        run: pnpm run gulp vscode-darwin-${{ env.VSCODE_ARCH }}-min
 
       - name: Verify the AI extension actually compiled
         # The build packages whatever out/ exists; without this file the app ships

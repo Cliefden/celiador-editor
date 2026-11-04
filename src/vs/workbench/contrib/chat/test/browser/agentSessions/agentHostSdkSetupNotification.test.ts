@@ -11,8 +11,10 @@ import { IAgentHostService } from '../../../../../../platform/agentHost/common/a
 import type { IAgentSdkSetupInfo } from '../../../../../../platform/agentHost/common/agentSdkSetup.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { TestConfigurationService } from '../../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { IDefaultAccountService } from '../../../../../../platform/defaultAccount/common/defaultAccount.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { MockContextKeyService } from '../../../../../../platform/keybinding/test/common/mockKeybindingService.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { AGENT_SDK_SETUP_DOWNLOAD_COMMAND_ID, AGENT_SDK_SETUP_GITHUB_SIGN_IN_COMMAND_ID, AGENT_SDK_SETUP_OPEN_DOCS_COMMAND_ID, AGENT_SDK_SETUP_RELOAD_COMMAND_ID, AGENT_SDK_SETUP_SIGN_IN_COMMAND_ID, AgentHostSdkSetupNotificationContribution, agentSdkSetupNotificationId, createAgentSdkSetupNotification, getAgentDisplayNames, getAgentSdkSetupState, getAgentSdkSetupStateToReport, hasAgentSdkSetupForSessionType, type IAgentSdkSetupStateInputs } from '../../../browser/agentSessions/agentHost/agentHostSdkSetupNotification.js';
 import { IAgentSdkSetupService, type AgentSdkSetupState } from '../../../../../services/agentHost/browser/agentSdkSetupService.js';
@@ -22,9 +24,8 @@ import { ChatInputNotificationActionKind, IChatInputNotificationService, type IC
 import { SessionType } from '../../../common/chatSessionsService.js';
 import { ILanguageModelsService, type ILanguageModelChatMetadata } from '../../../common/languageModels.js';
 
-/** Signed out, flag on, entitlement settled, SDK missing — the case this feature exists for. */
+/** Signed out, entitlement settled, SDK missing. */
 const BLOCKED_USER: IAgentSdkSetupStateInputs = {
-	allowSignedOutWhenUsable: true,
 	signedIn: false,
 	entitlementResolved: true,
 	download: 'notDownloaded',
@@ -51,7 +52,6 @@ suite('Agent SDK setup banner', () => {
 			{ name: 'SDK on disk reporting no models means no account', inputs: { ...BLOCKED_USER, download: 'ready' }, expected: 'noAccount' },
 			{ name: 'models are the honest end state, whatever the status says', inputs: { ...BLOCKED_USER, download: 'ready', hasModels: true }, expected: 'resolved' },
 			{ name: 'nothing shows until entitlement settles, since "signed out" is not yet a fact', inputs: { ...BLOCKED_USER, download: 'ready', entitlementResolved: false }, expected: undefined },
-			{ name: 'the missing-account explanation stays behind its flag', inputs: { ...BLOCKED_USER, download: 'ready', allowSignedOutWhenUsable: false }, expected: undefined },
 			{ name: 'a signed-in user is never told they have no account', inputs: { ...BLOCKED_USER, download: 'ready', signedIn: true }, expected: undefined },
 			{ name: 'a signed-in user can be offered an unresolved agent-owned account', inputs: { ...BLOCKED_USER, download: 'ready', signedIn: true, agentAccountState: 'needsSignIn' }, expected: 'noAccount' },
 			{ name: 'an agent-owned account is not guessed while discovery is unresolved', inputs: { ...BLOCKED_USER, download: 'ready', agentAccountState: 'unresolved' }, expected: undefined },
@@ -63,7 +63,6 @@ suite('Agent SDK setup banner', () => {
 			{ name: 'a signed-in user is offered the download too', inputs: { ...BLOCKED_USER, signedIn: true }, expected: 'downloadOffered' },
 			{ name: 'having models does not hide the download', inputs: { ...BLOCKED_USER, signedIn: true, hasModels: true }, expected: 'downloadOffered' },
 			{ name: 'the download offer does not wait for entitlement', inputs: { ...BLOCKED_USER, entitlementResolved: false }, expected: 'downloadOffered' },
-			{ name: 'the download offer is not behind the signed-out flag', inputs: { ...BLOCKED_USER, allowSignedOutWhenUsable: false }, expected: 'downloadOffered' },
 		];
 
 		for (const { name, inputs, expected } of cases) {
@@ -304,6 +303,7 @@ suite('Agent SDK setup banner', () => {
 			});
 			// Celiador: these cases cover the upstream banner; the Celiador variant is tested in 'presentation'.
 			instantiationService.stub(IProductService, { nameShort: 'Code - OSS' });
+			instantiationService.stub(IContextKeyService, new MockContextKeyService());
 
 			setModels(initialSessionTypes);
 			store.add(instantiationService.createInstance(AgentHostSdkSetupNotificationContribution));

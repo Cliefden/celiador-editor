@@ -44,6 +44,7 @@ function product(): ProductChannelFields {
   if (productCache !== undefined) {return productCache ?? {};}
   try {
     const file = path.join(vscode.env.appRoot, 'product.json');
+    // eslint-disable-next-line local/code-no-sync-fs -- Read once and cached; the daemon URL resolvers are synchronous and run before any request is made.
     productCache = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
     productCache = null;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Celiador: sign → notarize → staple → package → manifest [→ publish] the packaged macOS app.
 #
-# Input is the gulp output (`npm run gulp vscode-darwin-arm64-min` writes
+# Input is the gulp output (`pnpm run gulp vscode-darwin-arm64-min` writes
 # ../VSCode-darwin-arm64/<nameLong>.app — Celiador.app, or "Celiador Test.app" /
 # "Celiador Dev.app" after build/celiador/channel.sh, see CHANNELS.md). The app is
 # COPIED into the output dir and signed there, so the build you run locally is
@@ -85,7 +85,7 @@ done
 log() { printf '\n==> %s\n' "$*"; }
 die() { echo "error: $*" >&2; exit 1; }
 
-[[ -d "$APP" ]] || die "no app at $APP (build it first: npm run gulp vscode-darwin-arm64-min)"
+[[ -d "$APP" ]] || die "no app at $APP (build it first: pnpm run gulp vscode-darwin-arm64-min)"
 INSTALLED="${INSTALLED:-/Applications/$(basename "$APP")}"
 
 # Is the app this Mac actually runs the build with the fixes? Testing an older
