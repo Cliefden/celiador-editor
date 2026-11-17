@@ -226,11 +226,15 @@ async function getRepo(root?: string): Promise<GitRepository> {
   const ext = vscode.extensions.getExtension('vscode.git');
   if (!ext) {throw new Error('git is not available');}
   const api = (await ext.activate() as { getAPI(version: number): GitAPI }).getAPI(1);
-  // An agent task runs in its own worktree: open that repository rather than the window's.
-  const repo = root
-    ? api.getRepository(vscode.Uri.file(root)) ?? await api.openRepository(vscode.Uri.file(root))
-    : api.repositories[0];
-  if (!repo) {throw new Error(root ? `no git repository at ${root}` : 'no git repository open');}
+  // An agent task runs in its own worktree: open that repository rather than the
+  // window's. Otherwise use the repository of the first workspace folder, the
+  // same root the relay's file commands browse, so a phone's diff and its file
+  // view never show two different repositories in a multi-repo window.
+  const target = root ? vscode.Uri.file(root) : vscode.workspace.workspaceFolders?.[0]?.uri;
+  const repo = target
+    ? api.getRepository(target) ?? await api.openRepository(target)
+    : undefined;
+  if (!repo) {throw new Error(root ? `no git repository at ${root}` : 'the first workspace folder is not a git repository');}
   return repo;
 }
 
@@ -377,6 +381,8 @@ async function execute(args: GitReviewArgs): Promise<GitReviewResult> {
 /** Register the command the workbench relay bridge delegates git.* commands to. */
 export function registerGitReview(): vscode.Disposable {
   return vscode.commands.registerCommand('celiador.relayGit', async (args: GitReviewArgs): Promise<GitReviewResult> => {
+    // Git runs the repository's own hooks and config: never in Restricted Mode.
+    if (!vscode.workspace.isTrusted) {return { ok: false, error: 'this workspace is not trusted on the computer' };}
     try {
       return await execute(args);
     } catch (err) {
