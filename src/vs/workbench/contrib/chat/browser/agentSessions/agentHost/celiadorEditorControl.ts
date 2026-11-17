@@ -29,6 +29,7 @@ import { openSessionByResource } from '../agentSessionsOpener.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
 import { getLocalAgentHostSessionProvider } from './agentHostSessionUri.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
+import { CELIADOR_DAEMON_URL_SETTING, getCeliadorDaemonUrl } from './celiadorDaemonUrl.js';
 import { celiadorPickedUpComment, celiadorTaskRunEntries, findCeliadorTaskRun, parseCeliadorTaskRuns, serializeCeliadorTaskRuns, setCeliadorTaskRun, type ICeliadorTaskRun } from './celiadorTaskRuns.js';
 import { findOpenRepos, type ICeliadorOpenRepo } from './celiadorWorkspacePresence.js';
 
@@ -149,7 +150,6 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 
 	/** Must match the auth provider id registered by the celiador-ai extension. */
 	private static readonly AUTH_PROVIDER_ID = 'celiador';
-	private static readonly FALLBACK_DAEMON_URL = 'https://celiador.ai';
 	/** Reconnect/poll backoff when the stream drops or we're signed out. */
 	private static readonly RECONNECT_MS = 3_000;
 	/** The in-place action that opens a local agent-host Claude session (+ prompt). */
@@ -190,7 +190,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 	}
 
 	private _daemonUrl(): string {
-		return (this._productService.celiadorDaemonUrl ?? CeliadorEditorControl.FALLBACK_DAEMON_URL).replace(/\/+$/, '');
+		return getCeliadorDaemonUrl(this._productService, this._configurationService);
 	}
 
 	private async _token(): Promise<string | undefined> {
@@ -211,10 +211,17 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 				await this._backoff();
 				continue;
 			}
+			// Celiador: a changed daemon setting drops this stream so the next one goes to the new daemon.
+			const stream = new AbortController();
+			const settingListener = this._configurationService.onDidChangeConfiguration(e => {
+				if (e.affectsConfiguration(CELIADOR_DAEMON_URL_SETTING)) {
+					stream.abort();
+				}
+			});
 			try {
 				const res = await fetch(`${this._daemonUrl()}/api/presence/commands`, {
 					headers: { Authorization: `Bearer ${auth}` },
-					signal: this._abort.signal,
+					signal: AbortSignal.any([this._abort.signal, stream.signal]),
 				});
 				if (!res.ok || !res.body) {
 					await this._backoff();
@@ -243,6 +250,8 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 				}
 			} catch (e) {
 				this._logService.trace(`[celiador-control] stream error: ${e}`);
+			} finally {
+				settingListener.dispose();
 			}
 			await this._backoff();
 		}

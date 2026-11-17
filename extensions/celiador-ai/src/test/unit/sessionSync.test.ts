@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseStoredSession, planRefresh, sameSession, type Session } from '../../sessionSync';
+import { isDeadRefreshToken, parseStoredSession, planRefresh, sameSession, type Session } from '../../sessionSync';
 
 const a: Session = { access_token: 'at-1', refresh_token: 'rt-1', expires_at: 1000, email: 'me@example.com' };
 const rotated: Session = { access_token: 'at-2', refresh_token: 'rt-2', expires_at: 4600, email: 'me@example.com' };
@@ -34,4 +34,11 @@ test('a window whose session another window rotated adopts the rotated one', () 
 
 test('a window whose session another window signed out goes signed out', () => {
   assert.deepEqual(planRefresh(a, null), { kind: 'signedOut' });
+});
+
+test('only a refused refresh token signs out; offline, auth-key and server errors retry', () => {
+  assert.deepEqual(
+    [400, 403, undefined, 401, 408, 429, 500, 503].map(isDeadRefreshToken),
+    [true, true, false, false, false, false, false, false]
+  );
 });

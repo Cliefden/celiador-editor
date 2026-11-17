@@ -64,3 +64,15 @@ export function planRefresh(current: Session, stored: Session | null): RefreshPl
   }
   return { kind: 'adopt', session: stored };
 }
+
+/**
+ * Whether a failed refresh means the refresh token itself is dead (revoked,
+ * expired, already used, or the user was deleted), so retrying can never work
+ * and the window should sign out. GoTrue answers those with 400 (OAuth's
+ * `invalid_grant`: token not found, revoked or reused) or 403 (session gone,
+ * user banned). Everything else is worth retrying: offline (no status), 401
+ * (a missing API key, not a dead token), timeouts, rate limits, server errors.
+ */
+export function isDeadRefreshToken(status: number | undefined): boolean {
+  return status === 400 || status === 403;
+}

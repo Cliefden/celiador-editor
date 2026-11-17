@@ -5,7 +5,7 @@
 import * as vscode from 'vscode';
 import { getRestrictedSetting } from './config';
 import { resolveDaemonUrl, resolveUrlProtocol } from './productConfig';
-import { parseStoredSession, planRefresh, sameSession, type Session } from './sessionSync';
+import { isDeadRefreshToken, parseStoredSession, planRefresh, sameSession, type Session } from './sessionSync';
 
 // Dependency-free Supabase/GoTrue client for the editor. Supports PKCE-protected
 // OAuth and magic-link flows. Session stored in VS Code SecretStorage, access token
@@ -49,9 +49,18 @@ export interface SignInMethods {
   github?: boolean;
 }
 
+/** A GoTrue error answer, with its HTTP status. */
+class GoTrueError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 export class Auth implements vscode.Disposable {
   private cached: Session | null | undefined;
   private supaConfig: { base: string; anonKey: string; signIn?: SignInMethods } | undefined;
+  /** The daemon URL and Supabase override {@link supaConfig} was fetched for. */
+  private supaConfigKey: string | undefined;
   private readonly onChange = new vscode.EventEmitter<void>();
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   /** The in-flight refresh, so the timer and an on-demand refresh share one GoTrue call. */
@@ -103,20 +112,31 @@ export class Auth implements vscode.Disposable {
     return resolveDaemonUrl();
   }
 
-  /** Resolve the Supabase base URL + anon key (setting override → /api/config). */
+  /**
+   * Resolve the Supabase base URL + anon key (setting override → /api/config).
+   * Only an answer from the daemon is cached, and only for the daemon and
+   * override it came from: a failed first fetch (offline at startup) is retried
+   * on the next call, and a changed `celiador.daemonUrl` asks the new daemon.
+   */
   private async supa(): Promise<{ base: string; anonKey: string; signIn?: SignInMethods }> {
-    if (this.supaConfig) {return this.supaConfig;}
+    const daemon = this.daemonUrl();
     const override = getRestrictedSetting<string>('supabaseUrl', '');
-    let cfg: any = {};
+    const key = `${daemon}\n${override}`;
+    if (this.supaConfig && this.supaConfigKey === key) {return this.supaConfig;}
+    let cfg: any;
     try {
-      const res = await fetch(`${this.daemonUrl()}/api/config`, { headers: { Accept: 'application/json' } });
+      const res = await fetch(`${daemon}/api/config`, { headers: { Accept: 'application/json' } });
       if (res.ok) {cfg = await res.json();}
     } catch {
-      /* fall back to daemon URL */
+      /* fall back to daemon URL, uncached */
     }
-    const base = (override || cfg.supabaseUrl || this.daemonUrl()).replace(/\/+$/, '');
-    this.supaConfig = { base, anonKey: cfg.supabaseAnonKey || '', signIn: cfg.signIn && typeof cfg.signIn === 'object' ? cfg.signIn : undefined };
-    return this.supaConfig;
+    const base = (override || cfg?.supabaseUrl || daemon).replace(/\/+$/, '');
+    const config = { base, anonKey: cfg?.supabaseAnonKey || '', signIn: cfg?.signIn && typeof cfg.signIn === 'object' ? cfg.signIn : undefined };
+    if (cfg) {
+      this.supaConfig = config;
+      this.supaConfigKey = key;
+    }
+    return config;
   }
 
   /**
@@ -152,7 +172,7 @@ export class Auth implements vscode.Disposable {
     });
     const data: any = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data?.error_description || data?.msg || data?.error || `HTTP ${res.status}`);
+      throw new GoTrueError(data?.error_description || data?.msg || data?.error || `HTTP ${res.status}`, res.status);
     }
     return data;
   }
@@ -349,6 +369,14 @@ export class Auth implements vscode.Disposable {
       if (after.kind === 'adopt') {
         if (!sameSession(this.cached, after.session)) {this.adopt(after.session);}
         return after.session;
+      }
+      // The refresh token is dead (revoked, expired or the account is gone):
+      // retrying can never work, so sign out and say so instead of retrying forever.
+      if (after.kind === 'refresh' && this.supaConfig && isDeadRefreshToken(err instanceof GoTrueError ? err.status : undefined)) {
+        await this.signOut();
+        void vscode.window.showWarningMessage('Your Celiador session has ended. Sign in again to keep using Celiador.', 'Sign In').then((choice) => {
+          if (choice) {void vscode.commands.executeCommand('celiador.signIn');}
+        });
       }
       throw err;
     }
