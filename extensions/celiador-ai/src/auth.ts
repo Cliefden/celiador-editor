@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
+import { generatePkce } from './pkce';
 import { getRestrictedSetting } from './config';
 import { resolveDaemonUrl, resolveUrlProtocol } from './productConfig';
 import { parseStoredSession, planRefresh, sameSession, type Session } from './sessionSync';
@@ -169,17 +170,6 @@ export class Auth implements vscode.Disposable {
 
   // ---- PKCE helpers ---------------------------------------------------------
 
-  private async generatePkce(): Promise<{ verifier: string; challenge: string }> {
-    const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-    const data = new TextEncoder().encode(verifier);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const challenge = Buffer.from(hashBuffer)
-      .toString('base64url');
-    return { verifier, challenge };
-  }
-
   private async storePkce(verifier: string): Promise<void> {
     const state: PkceState = { verifier, expiresAt: Date.now() + 10 * 60 * 1000 };
     await this.secrets.store(PKCE_KEY, JSON.stringify(state));
@@ -215,7 +205,7 @@ export class Auth implements vscode.Disposable {
 
   async sendMagicLink(email: string): Promise<void> {
     const { base, anonKey } = await this.supa();
-    const { verifier, challenge } = await this.generatePkce();
+    const { verifier, challenge } = await generatePkce();
     await this.storePkce(verifier);
     const url = `${base}/auth/v1/otp?redirect_to=${encodeURIComponent(authRedirect())}`;
     const res = await fetch(url, {
@@ -236,7 +226,7 @@ export class Auth implements vscode.Disposable {
 
   async signInWithGitHub(): Promise<void> {
     const { base } = await this.supa();
-    const { verifier, challenge } = await this.generatePkce();
+    const { verifier, challenge } = await generatePkce();
     await this.storePkce(verifier);
     const url = `${base}/auth/v1/authorize?provider=github&redirect_to=${encodeURIComponent(authRedirect())}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=s256`;
     await vscode.env.openExternal(vscode.Uri.parse(url));
