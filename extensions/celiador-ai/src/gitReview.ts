@@ -2,8 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { promises as fs } from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { composeTaskPrBody } from './agents/prBody';
+import { isInside, relaySegments } from './relayPaths';
 
 // The relay's run-review executor. The workbench relay bridge receives `git.*`
 // commands from the phone (via the daemon) and delegates here over the
@@ -271,11 +274,9 @@ function relPath(repo: GitRepository, uri: vscode.Uri): string {
   return uri.path.startsWith(`${root}/`) ? uri.path.slice(root.length + 1) : uri.path;
 }
 
-/** Resolve a repo-relative path to an absolute fsPath, rejecting `..` escapes. */
+/** Resolve a repo-relative path to an absolute fsPath (see {@link relaySegments}). */
 function absPath(repo: GitRepository, rel: string): string {
-  const segments = rel.split('/').filter((s) => s.length > 0 && s !== '.');
-  if (segments.some((s) => s === '..')) {throw new Error('bad path');}
-  return vscode.Uri.joinPath(repo.rootUri, ...segments).fsPath;
+  return vscode.Uri.joinPath(repo.rootUri, ...relaySegments(rel)).fsPath;
 }
 
 /** All changed files (index + working tree + untracked), de-duped, ignored skipped. */
@@ -292,9 +293,18 @@ function changedFiles(repo: GitRepository): Array<{ path: string; status: string
   return [...seen.entries()].map(([path, status]) => ({ path, status })).sort((a, b) => a.path.localeCompare(b.path));
 }
 
-/** A pseudo-patch for a file git can't diff yet (untracked): whole file as added. */
+/**
+ * A pseudo-patch for a file git can't diff yet (untracked): whole file as added.
+ * The file's real path must stay inside the repository, so a symbolic link in
+ * the worktree cannot hand the phone a file from elsewhere on the computer.
+ */
 async function untrackedPatch(repo: GitRepository, rel: string): Promise<string> {
-  const bytes = await vscode.workspace.fs.readFile(vscode.Uri.joinPath(repo.rootUri, ...rel.split('/')));
+  const file = absPath(repo, rel);
+  const [realRoot, realFile] = await Promise.all([fs.realpath(repo.rootUri.fsPath), fs.realpath(file)]);
+  if (!isInside(realRoot, realFile) || isInside(path.join(realRoot, '.git'), realFile)) {
+    throw new Error('the phone cannot follow symbolic links out of the repository');
+  }
+  const bytes = await fs.readFile(realFile);
   const text = new TextDecoder().decode(bytes);
   const lines = text.length ? text.replace(/\n$/, '').split('\n') : [];
   return [`--- /dev/null`, `+++ b/${rel}`, `@@ -0,0 +1,${lines.length} @@`, ...lines.map((l) => `+${l}`)].join('\n');
@@ -313,7 +323,8 @@ async function execute(args: GitReviewArgs): Promise<GitReviewResult> {
         await repo.status();
         const parts: string[] = [];
         for (const file of changedFiles(repo)) {
-          parts.push(file.status === 'U' ? await untrackedPatch(repo, file.path) : await repo.diffWithHEAD(file.path));
+          // A file the phone may not read (a symbolic link out of the repository) is left out.
+          parts.push(file.status === 'U' ? await untrackedPatch(repo, file.path).catch(() => '') : await repo.diffWithHEAD(file.path));
         }
         return { ok: true, patch: parts.filter((p) => p.length > 0).join('\n') };
       }
