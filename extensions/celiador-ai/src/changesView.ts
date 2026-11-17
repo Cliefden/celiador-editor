@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import * as path from 'path';
 import { promisify } from 'util';
+import { nonce as getNonce } from './agents/webview';
 
 const run = promisify(execFile);
 
@@ -159,11 +160,4 @@ function parseStatus(stdout: string): ChangedFile[] {
     files.push({ status, path: p });
   }
   return files;
-}
-
-function getNonce(): string {
-  let text = '';
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {text += chars.charAt(Math.floor(Math.random() * chars.length));}
-  return text;
 }
