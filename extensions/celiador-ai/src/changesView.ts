@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import * as path from 'path';
 import { promisify } from 'util';
+import { nonce as getNonce } from './agents/webview';
 
 const run = promisify(execFile);
 
@@ -40,6 +41,9 @@ export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {void this.refresh();}
     });
+    // Restricted Mode shows nothing until the user trusts the folder; refresh then.
+    const trustSub = vscode.workspace.onDidGrantWorkspaceTrust(() => void this.refresh());
+    webviewView.onDidDispose(() => trustSub.dispose());
     void this.refresh();
   }
 
@@ -53,6 +57,12 @@ export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
     const root = this.workspaceRoot();
     if (!root) {
       this.view.webview.postMessage({ type: 'files', files: [], error: 'No folder open.' });
+      return;
+    }
+    // Running git in an untrusted folder can run its code: the repository's own
+    // config (core.fsmonitor, hooks) decides what `git status` executes.
+    if (!vscode.workspace.isTrusted) {
+      this.view.webview.postMessage({ type: 'files', files: [], error: 'Trust this folder to see its changes. Git does not run here in Restricted Mode.' });
       return;
     }
     try {
@@ -159,11 +169,4 @@ function parseStatus(stdout: string): ChangedFile[] {
     files.push({ status, path: p });
   }
   return files;
-}
-
-function getNonce(): string {
-  let text = '';
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {text += chars.charAt(Math.floor(Math.random() * chars.length));}
-  return text;
 }

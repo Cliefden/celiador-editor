@@ -127,8 +127,9 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private readonly _backendToKey = new Map<string, string>();
 	/** chat channel URI string → owning sessionResource.toString() (routes action events). */
 	private readonly _chatChannelToKey = new Map<string, string>();
-	/** Channels we've already trace-logged as unrouted (avoid per-delta spam). */
+	/** Channels we've already trace-logged as unrouted (avoid per-delta spam); cleared at {@link MAX_UNROUTED_LOGGED}. */
 	private readonly _unroutedLogged = new Set<string>();
+	private static readonly MAX_UNROUTED_LOGGED = 500;
 	/**
 	 * Chat actions that arrived before their session had a relay client. A NEW
 	 * session dispatches (and echoes) its first `ChatTurnStarted` while the
@@ -141,18 +142,22 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	private _earlyActions: { readonly envelope: ActionEnvelope; readonly at: number }[] = [];
 	private static readonly MAX_EARLY_ACTIONS = 200;
 	private static readonly EARLY_ACTION_TTL_MS = 60_000;
-	/** toolCallId → tool display name (captured at ChatToolCallStart, used to label approvals). */
-	private readonly _toolNameByCallId = new Map<string, string>();
 	/**
-	 * toolCallIds whose `tool` event waits for the final input (ChatToolCallReady),
-	 * so it can name the file / command / pattern; published bare if Ready never comes.
+	 * toolCallId → its tool display name (captured at ChatToolCallStart, used to
+	 * label approvals), the mirrored session it belongs to, and whether its `tool`
+	 * event still waits for the final input (ChatToolCallReady), so it can name the
+	 * file / command / pattern; published bare if Ready never comes. Dropped when
+	 * the call completes or its session leaves, and capped for calls that do neither.
 	 */
-	private readonly _unpublishedTools = new Set<string>();
+	private readonly _toolCalls = new Map<string, { readonly name: string; readonly key: string; unpublished: boolean }>();
+	private static readonly MAX_TOOL_CALLS = 1_000;
 	/** requestId (= toolCallId) → what a phone approve/deny must dispatch back. */
 	private readonly _pendingApprovals = new Map<string, { readonly chatChannel: string; readonly turnId: string; readonly toolCallId: string }>();
-	/** Texts of turns the phone itself dispatched — their ChatTurnStarted echo must
-	 * not be re-published as a user message (the daemon already logged it). */
-	private readonly _phoneSentTexts: string[] = [];
+	/** sessionResource.toString() → texts of turns the phone itself dispatched there —
+	 * their ChatTurnStarted echo must not be re-published as a user message (the
+	 * daemon already logged it). Per session, so the same text typed into another
+	 * session is still mirrored. */
+	private readonly _phoneSentTexts = new Map<string, string[]>();
 	/** input request id → what a phone answer must dispatch back. */
 	private readonly _pendingQuestions = new Map<string, { readonly chatChannel: string; readonly questionId: string }>();
 
@@ -489,6 +494,9 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				this._bufferEarlyAction(envelope);
 			}
 			if (!this._unroutedLogged.has(channel)) {
+				if (this._unroutedLogged.size >= CeliadorRelayBridge.MAX_UNROUTED_LOGGED) {
+					this._unroutedLogged.clear();
+				}
 				this._unroutedLogged.add(channel);
 				this._logService.trace(`[celiador-relay] unrouted action channel ${channel} (${isMirrorableChat ? 'buffered' : 'ignored'}; clients: ${[...this._clients.keys()].join(', ') || 'none'})`);
 			}
@@ -509,9 +517,10 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				// single source of those (POST /:id/message logs them).
 				const text = action.message?.text;
 				if (typeof text === 'string' && text.length > 0) {
-					const echo = this._phoneSentTexts.indexOf(text);
+					const sent = this._phoneSentTexts.get(key) ?? [];
+					const echo = sent.indexOf(text);
 					if (echo >= 0) {
-						this._phoneSentTexts.splice(echo, 1);
+						sent.splice(echo, 1);
 					} else {
 						client.publish({ kind: 'message', role: 'user', text });
 					}
@@ -524,13 +533,17 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 				}
 				break;
 			case ActionType.ChatToolCallStart:
-				// Published at Ready, once the input is final (see _unpublishedTools).
-				this._toolNameByCallId.set(action.toolCallId, action.toolName);
-				this._unpublishedTools.add(action.toolCallId);
+				// Published at Ready, once the input is final (see _toolCalls).
+				this._toolCalls.set(action.toolCallId, { name: action.toolName, key, unpublished: true });
+				if (this._toolCalls.size > CeliadorRelayBridge.MAX_TOOL_CALLS) {
+					this._toolCalls.delete(this._toolCalls.keys().next().value!); // oldest first
+				}
 				break;
-			case ActionType.ChatToolCallReady:
-				if (this._unpublishedTools.delete(action.toolCallId)) {
-					const name = this._toolNameByCallId.get(action.toolCallId) ?? 'tool';
+			case ActionType.ChatToolCallReady: {
+				const call = this._toolCalls.get(action.toolCallId);
+				if (call?.unpublished) {
+					call.unpublished = false;
+					const name = call.name;
 					// Only a path / command / pattern — never file contents (summarizeRelayToolInput).
 					const root = getCeliadorTaskRun(key)?.worktree ?? this._workspaceService.getWorkspace().folders[0]?.uri;
 					const input = typeof action.toolInput === 'string' ? summarizeRelayToolInput(name, action.toolInput, root?.fsPath) : {};
@@ -544,20 +557,23 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 					client.publish({
 						kind: 'approval',
 						requestId: action.toolCallId,
-						approvalKind: this._toolNameByCallId.get(action.toolCallId) ?? 'tool',
+						approvalKind: call?.name ?? 'tool',
 						title: typeof title === 'string' ? title : title.markdown,
 					});
 				}
 				break;
+			}
 			case ActionType.ChatToolCallConfirmed:
-			case ActionType.ChatToolCallComplete:
+			case ActionType.ChatToolCallComplete: {
 				// Resolved (locally or remotely) — drop any stale pending approval.
-				if (this._unpublishedTools.delete(action.toolCallId)) {
-					client.publish({ kind: 'tool', callId: action.toolCallId, name: this._toolNameByCallId.get(action.toolCallId) ?? 'tool', input: {} });
+				const call = this._toolCalls.get(action.toolCallId);
+				if (call?.unpublished) {
+					client.publish({ kind: 'tool', callId: action.toolCallId, name: call.name, input: {} });
 				}
 				this._pendingApprovals.delete(action.toolCallId);
-				this._toolNameByCallId.delete(action.toolCallId);
+				this._toolCalls.delete(action.toolCallId);
 				break;
+			}
 			case ActionType.ChatInputRequested: {
 				// The agent is asking the user something — relay it so the phone shows the
 				// question, and remember the first question id so a phone answer can target it.
@@ -616,10 +632,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		const message = { text, origin: { kind: MessageKind.User } };
 		// Remember the text so its ChatTurnStarted echo isn't re-published as a
 		// user message (bounded — stale entries age out by position).
-		this._phoneSentTexts.push(text);
-		if (this._phoneSentTexts.length > 20) {
-			this._phoneSentTexts.shift();
+		const sent = this._phoneSentTexts.get(key) ?? [];
+		sent.push(text);
+		if (sent.length > 20) {
+			sent.shift();
 		}
+		this._phoneSentTexts.set(key, sent);
 		if (this._lastStatus.get(key) === ChatSessionStatus.InProgress) {
 			const action: ChatPendingMessageSetAction = {
 				type: ActionType.ChatPendingMessageSet,
@@ -851,6 +869,12 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			this._watches.delete(key);
 		}
 		this._lastStatus.delete(key);
+		this._phoneSentTexts.delete(key);
+		for (const [toolCallId, call] of this._toolCalls) {
+			if (call.key === key) {
+				this._toolCalls.delete(toolCallId);
+			}
+		}
 	}
 
 	override dispose(): void {
@@ -864,7 +888,9 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		this._watches.clear();
 		this._lastStatus.clear();
 		this._chatChannelToKey.clear();
-		this._toolNameByCallId.clear();
+		this._toolCalls.clear();
+		this._phoneSentTexts.clear();
+		this._unroutedLogged.clear();
 		this._pendingApprovals.clear();
 		this._pendingQuestions.clear();
 		this._earlyActions = [];

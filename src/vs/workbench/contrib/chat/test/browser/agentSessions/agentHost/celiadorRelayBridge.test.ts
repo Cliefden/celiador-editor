@@ -83,11 +83,14 @@ suite('CeliadorRelayBridge', () => {
 	/** The backend address the agent host uses for it (upstream's `ahp-session:/` scheme). */
 	const backendSession = (id: string) => URI.parse(`ahp-session:/${id}`);
 	const taskRunKeys: URI[] = [];
+	/** The options the bridge built each relay client with (its phone-command callbacks). */
+	const clientOptions = new Map<CeliadorRelayClient, ICeliadorRelayClientOptions>();
 
 	teardown(() => {
 		for (const key of taskRunKeys.splice(0)) {
 			deleteCeliadorTaskRun(key);
 		}
+		clientOptions.clear();
 	});
 
 	function setUp(initialSessions: IAgentSession[] = []) {
@@ -116,6 +119,7 @@ suite('CeliadorRelayBridge', () => {
 				}();
 				return { object: object as unknown as IAgentSubscription<T>, dispose: () => { } };
 			}
+			override dispatch(): void { }
 		}());
 		instantiationService.stub(IAgentHostConnectionsService, new class extends mock<IAgentHostConnectionsService>() {
 			override resolveSessionResourceIdentity(resource: URI): IAgentHostSessionIdentity {
@@ -186,6 +190,7 @@ suite('CeliadorRelayBridge', () => {
 			protected override _newRelayClient(options: ICeliadorRelayClientOptions): CeliadorRelayClient {
 				const client = new RecordingRelayClient(options);
 				clients.push(client);
+				clientOptions.set(client, options);
 				return client;
 			}
 		}
@@ -258,6 +263,28 @@ suite('CeliadorRelayBridge', () => {
 				],
 			}],
 		});
+	});
+
+	test('hides the echo of a phone instruction only in the session the phone sent it to', async () => {
+		const harness = setUp();
+		const chat1 = opaqueChat();
+		const chat2 = opaqueChat();
+		harness.advertise('s1', chat1);
+		harness.advertise('s2', chat2);
+		asTaskRun('s1', 'task-1');
+		asTaskRun('s2', 'task-2');
+		harness.createBridge();
+
+		harness.setSessions([session('s1', ChatSessionStatus.InProgress), session('s2', ChatSessionStatus.InProgress)]);
+		await timeout(0);
+		clientOptions.get(harness.clients[0])!.onInstruct!('Run the tests');
+		harness.fire(chat1, turnStarted('Run the tests'));
+		harness.fire(chat2, turnStarted('Run the tests'));
+
+		assert.deepStrictEqual(harness.clients.map(client => client.events.filter(event => event.kind === 'message')), [
+			[],
+			[{ kind: 'message', role: 'user', text: 'Run the tests' }],
+		]);
 	});
 
 	test('mirrors a session already running when the bridge starts, with the first turn it sent before being claimed', () => runWithFakedTimers({}, async () => {

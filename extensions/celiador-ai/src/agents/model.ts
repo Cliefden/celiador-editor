@@ -280,6 +280,26 @@ export function toolLine(name: string, input: unknown): string {
  * The first user turn is the task's prompt (shown as the issue quote), so it
  * is skipped when `skipFirstUser` is set.
  */
+/** The most events a run panel keeps for its transcript (after merging deltas). */
+export const MAX_TRANSCRIPT_EVENTS = 5_000;
+
+/**
+ * Add one streamed session event to `events`. An event at or below the last
+ * held `seq` is skipped (a reconnect resumes from a cursor, but may overlap);
+ * consecutive deltas merge into one, as {@link buildTranscript} would; and only
+ * the newest `max` events are kept, so a long run can't grow without bound.
+ */
+export function addSessionEvent(events: SessionEvent[], ev: SessionEvent, max = MAX_TRANSCRIPT_EVENTS): void {
+  const last = events[events.length - 1];
+  if (typeof ev.seq === 'number' && typeof last?.seq === 'number' && ev.seq <= last.seq) {return;}
+  if (ev.kind === 'delta' && last?.kind === 'delta') {
+    events[events.length - 1] = { ...last, seq: ev.seq ?? last.seq, text: (last.text ?? '') + (ev.text ?? '') };
+    return;
+  }
+  events.push(ev);
+  if (events.length > max) {events.splice(0, events.length - max);}
+}
+
 export function buildTranscript(events: readonly SessionEvent[], skipFirstUser = true): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   let text = '';

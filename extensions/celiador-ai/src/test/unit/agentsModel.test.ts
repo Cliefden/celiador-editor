@@ -4,7 +4,29 @@
  *--------------------------------------------------------------------------------------------*/
 import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bucketTasks, buildTranscript, issueQuote, parseNumstat, parseUnifiedDiff, runMeta, slotsLabel, taskSubtitle, type Task } from '../../agents/model';
+import { addSessionEvent, bucketTasks, buildTranscript, issueQuote, parseNumstat, parseUnifiedDiff, runMeta, slotsLabel, taskSubtitle, type SessionEvent, type Task } from '../../agents/model';
+import { nonce } from '../../agents/webview';
+
+test('transcript events skip replayed seqs, merge deltas and stay bounded', () => {
+  const events: SessionEvent[] = [];
+  const add = (ev: SessionEvent) => addSessionEvent(events, ev, 3);
+  add({ seq: 1, kind: 'message', role: 'user', text: 'Fix it' });
+  add({ seq: 2, kind: 'delta', text: 'Look' });
+  add({ seq: 3, kind: 'delta', text: 'ing' });
+  add({ seq: 3, kind: 'delta', text: 'ing' }); // replayed after a reconnect
+  add({ seq: 4, kind: 'tool', name: 'Read' });
+  add({ seq: 5, kind: 'done' });
+  assert.deepEqual(events, [
+    { seq: 3, kind: 'delta', text: 'Looking' },
+    { seq: 4, kind: 'tool', name: 'Read' },
+    { seq: 5, kind: 'done' },
+  ]);
+});
+
+test('webview nonces are unpredictable base64url strings', () => {
+  const a = nonce();
+  assert.deepEqual([/^[A-Za-z0-9_-]{22}$/.test(a), a === nonce()], [true, false]);
+});
 
 const NOW = new Date('2026-10-26T15:00:00');
 

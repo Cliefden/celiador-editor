@@ -21,37 +21,9 @@ export class DaemonError extends Error {
   }
 }
 
-/**
- * Read a `text/event-stream` response, calling `onEvent(event, data)` per frame
- * (event defaults to "message"). Resolves when the stream ends.
- */
-export async function readSse(res: Response, onEvent: (event: string, data: string) => void): Promise<void> {
-  if (!res.body) {return;}
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  let event = 'message';
-  let data: string[] = [];
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {break;}
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() ?? '';
-    for (const rawLine of lines) {
-      const line = rawLine.replace(/\r$/, '');
-      if (line === '') {
-        if (data.length) {onEvent(event, data.join('\n'));}
-        event = 'message';
-        data = [];
-      } else if (line.startsWith('event:')) {
-        event = line.slice(6).trim();
-      } else if (line.startsWith('data:')) {
-        data.push(line.slice(5).replace(/^ /, ''));
-      }
-    }
-  }
-}
+// `text/event-stream` parsing lives in its own module so it can be unit tested.
+import { readSse } from '../sse';
+export { readSse };
 
 /** Authenticated calls to the daemon's task + session endpoints. */
 export class TasksClient {
@@ -120,8 +92,10 @@ export class TasksClient {
   }
 
   /** Stream a relay session's event log (replay, then live) until `signal` aborts. */
-  async sessionEvents(sessionId: string, onEvent: (ev: SessionEvent) => void, signal: AbortSignal): Promise<void> {
-    const res = await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/events`, { headers: { Accept: 'text/event-stream' }, signal });
+  async sessionEvents(sessionId: string, onEvent: (ev: SessionEvent) => void, signal: AbortSignal, afterSeq?: number): Promise<void> {
+    // `cursor`: replay only events after this seq (the daemon's resume point).
+    const query = typeof afterSeq === 'number' ? `?cursor=${afterSeq}` : '';
+    const res = await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/events${query}`, { headers: { Accept: 'text/event-stream' }, signal });
     if (!res.ok) {throw new DaemonError(`HTTP ${res.status}`, res.status);}
     await readSse(res, (event, data) => {
       if (event !== 'message') {return;}
