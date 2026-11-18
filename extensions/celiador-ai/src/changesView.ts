@@ -40,6 +40,9 @@ export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {void this.refresh();}
     });
+    // Restricted Mode shows nothing until the user trusts the folder; refresh then.
+    const trustSub = vscode.workspace.onDidGrantWorkspaceTrust(() => void this.refresh());
+    webviewView.onDidDispose(() => trustSub.dispose());
     void this.refresh();
   }
 
@@ -53,6 +56,12 @@ export class CeliadorChangesViewProvider implements vscode.WebviewViewProvider {
     const root = this.workspaceRoot();
     if (!root) {
       this.view.webview.postMessage({ type: 'files', files: [], error: 'No folder open.' });
+      return;
+    }
+    // Running git in an untrusted folder can run its code: the repository's own
+    // config (core.fsmonitor, hooks) decides what `git status` executes.
+    if (!vscode.workspace.isTrusted) {
+      this.view.webview.postMessage({ type: 'files', files: [], error: 'Trust this folder to see its changes. Git does not run here in Restricted Mode.' });
       return;
     }
     try {
