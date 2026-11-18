@@ -5,6 +5,7 @@
 import * as vscode from 'vscode';
 import { Auth } from './auth';
 import type { DaemonApi, Me } from './api';
+import { nonce as getNonce } from './agents/webview';
 
 /**
  * The Celiador welcome/account pane — always visible in the Celiador sidebar.
@@ -222,11 +223,4 @@ export class CeliadorWelcomeViewProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
   }
-}
-
-function getNonce(): string {
-  let text = '';
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {text += chars.charAt(Math.floor(Math.random() * chars.length));}
-  return text;
 }

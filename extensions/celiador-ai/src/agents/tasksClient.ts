@@ -120,8 +120,10 @@ export class TasksClient {
   }
 
   /** Stream a relay session's event log (replay, then live) until `signal` aborts. */
-  async sessionEvents(sessionId: string, onEvent: (ev: SessionEvent) => void, signal: AbortSignal): Promise<void> {
-    const res = await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/events`, { headers: { Accept: 'text/event-stream' }, signal });
+  async sessionEvents(sessionId: string, onEvent: (ev: SessionEvent) => void, signal: AbortSignal, afterSeq?: number): Promise<void> {
+    // `cursor`: replay only events after this seq (the daemon's resume point).
+    const query = typeof afterSeq === 'number' ? `?cursor=${afterSeq}` : '';
+    const res = await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/events${query}`, { headers: { Accept: 'text/event-stream' }, signal });
     if (!res.ok) {throw new DaemonError(`HTTP ${res.status}`, res.status);}
     await readSse(res, (event, data) => {
       if (event !== 'message') {return;}

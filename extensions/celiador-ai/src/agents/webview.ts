@@ -7,11 +7,9 @@
 // remote resources, inline styles only), theme variables for every colour, and
 // small DOM helpers injected into each page's script.
 
+/** A CSP script nonce: 128 bits from the platform's cryptographic random source. */
 export function nonce(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let text = '';
-  for (let i = 0; i < 32; i++) {text += chars.charAt(Math.floor(Math.random() * chars.length));}
-  return text;
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url');
 }
 
 /** Base styles: VS Code theme variables only, so the page follows the workbench theme. */

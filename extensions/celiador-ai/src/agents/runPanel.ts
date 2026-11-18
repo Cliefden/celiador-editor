@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
 import { defaultBranch, githubApi, githubToken, gitUriAt, parseGitHubRemote, runGit } from '../gitReview';
-import { buildTranscript, issueQuote, parseNumstat, parseUnifiedDiff, prNumber, runMeta, type DiffLine, type FileStat, type SessionEvent, type Task, type TranscriptItem } from './model';
+import { addSessionEvent, buildTranscript, issueQuote, parseNumstat, parseUnifiedDiff, prNumber, runMeta, type DiffLine, type FileStat, type SessionEvent, type Task, type TranscriptItem } from './model';
 import { DaemonError, type TaskFeed, type TasksClient } from './tasksClient';
 import { nonce, page } from './webview';
 
@@ -476,15 +476,14 @@ export class RunPanel {
       let backoff = 1_000;
       while (!abort.signal.aborted && !this.disposed) {
         try {
-          // Each connection replays the log from the start, so begin afresh.
-          let first = true;
+          // A reconnect resumes after the last event held instead of replaying the whole log.
+          const cursor = this.events[this.events.length - 1]?.seq;
           await this.ctx.client.sessionEvents(sessionId, (ev) => {
-            if (first) {this.events = []; first = false;}
-            this.events.push(ev);
+            addSessionEvent(this.events, ev);
             this.live = true;
             backoff = 1_000;
             this.scheduleTranscript();
-          }, abort.signal);
+          }, abort.signal, cursor);
         } catch (err) {
           if (err instanceof DaemonError && err.status === 404) {break;} // the session is gone
         }
