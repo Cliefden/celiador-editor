@@ -37,6 +37,7 @@ import { isAgentHostTarget } from '../agentSessions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
 import { CeliadorRelayClient, ICeliadorRelayClientOptions, IRelayGitArgs, RelayFsKind, RelayGitKind, summarizeRelayToolInput } from './celiadorRelayClient.js';
 import { isRelayReadDenied, isRelayWriteDenied, parseRelayPath } from './celiadorRelayPaths.js';
+import { getCeliadorDaemonUrl } from './celiadorDaemonUrl.js';
 import { getCeliadorTaskRun } from './celiadorTaskRuns.js';
 
 /**
@@ -95,7 +96,7 @@ type SessionMirroredClassification = {
  *
  * Auth token comes from the registered `celiador` VS Code authentication provider
  * (the same Supabase session that routes the agent through the daemon); the daemon
- * URL from `product.celiadorDaemonUrl`.
+ * URL from {@link getCeliadorDaemonUrl}, the same rule the extension applies.
  */
 export class CeliadorRelayBridge extends Disposable implements IWorkbenchContribution {
 
@@ -103,7 +104,6 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 
 	/** Must match the auth provider id registered by the celiador-ai extension. */
 	private static readonly AUTH_PROVIDER_ID = 'celiador';
-	private static readonly FALLBACK_DAEMON_URL = 'https://celiador.ai';
 	/** Largest file we send to the phone as text; larger is returned truncated. */
 	private static readonly MAX_FILE_BYTES = 1_000_000;
 
@@ -189,7 +189,7 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	}
 
 	private _daemonUrl(): string {
-		return (this._productService.celiadorDaemonUrl ?? CeliadorRelayBridge.FALLBACK_DAEMON_URL).replace(/\/+$/, '');
+		return getCeliadorDaemonUrl(this._productService, this._configurationService);
 	}
 
 	private async _token(): Promise<string | undefined> {

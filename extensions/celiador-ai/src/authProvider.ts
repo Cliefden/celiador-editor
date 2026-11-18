@@ -129,14 +129,34 @@ export class CeliadorAuthProvider implements vscode.AuthenticationProvider, vsco
  * to the agent's protected resource (whose authorization server is the daemon
  * URL). The `authorizationServerGlobs` in package.json only drive activation of a
  * not-yet-registered provider; once registered, matching uses this list alone.
+ *
+ * The list follows `celiador.daemonUrl`: when the setting changes, the provider is
+ * registered again for the new daemon, so a token is never matched to a daemon
+ * other than the one it was issued for.
  */
-export function registerCeliadorAuthProvider(auth: Auth, daemonUrl: string): vscode.Disposable {
+export function registerCeliadorAuthProvider(auth: Auth, daemonUrl: () => string): vscode.Disposable {
 	const provider = new CeliadorAuthProvider(auth);
-	const registration = vscode.authentication.registerAuthenticationProvider(
-		CELIADOR_AUTH_PROVIDER_ID,
-		CELIADOR_AUTH_PROVIDER_LABEL,
-		provider,
-		{ supportsMultipleAccounts: false, supportedAuthorizationServers: [vscode.Uri.parse(daemonUrl)] },
-	);
-	return vscode.Disposable.from(registration, provider);
+	let registeredFor: string | undefined;
+	let registration: vscode.Disposable | undefined;
+	const register = () => {
+		const url = daemonUrl();
+		if (url === registeredFor) {
+			return;
+		}
+		registration?.dispose();
+		registeredFor = url;
+		registration = vscode.authentication.registerAuthenticationProvider(
+			CELIADOR_AUTH_PROVIDER_ID,
+			CELIADOR_AUTH_PROVIDER_LABEL,
+			provider,
+			{ supportsMultipleAccounts: false, supportedAuthorizationServers: [vscode.Uri.parse(url)] },
+		);
+	};
+	register();
+	const settingSub = vscode.workspace.onDidChangeConfiguration((e) => {
+		if (e.affectsConfiguration('celiador.daemonUrl')) {
+			register();
+		}
+	});
+	return vscode.Disposable.from(settingSub, { dispose: () => registration?.dispose() }, provider);
 }

@@ -113,15 +113,19 @@ export function activate(context: vscode.ExtensionContext): void {
   // Expose the Supabase session as a VS Code authentication provider so the native
   // Agents Window can resolve a token for the daemon's `celiador-daemon` resource and
   // route the Claude agent through the daemon.
-  context.subscriptions.push(registerCeliadorAuthProvider(auth, daemonUrl()));
+  context.subscriptions.push(registerCeliadorAuthProvider(auth, () => daemonUrl()));
 
   // Capture the Supabase OAuth / magic-link deep link (celiador://…/auth-callback).
   context.subscriptions.push(
     vscode.window.registerUriHandler({
       handleUri: async (uri) => {
         if (!auth) {return;}
-        if (await auth.handleCallback(uri)) {
-          void vscode.window.showInformationMessage(`Signed in to Celiador as ${(await auth.currentEmail()) ?? 'your account'}.`);
+        try {
+          if (await auth.handleCallback(uri)) {
+            void vscode.window.showInformationMessage(`Signed in to Celiador as ${(await auth.currentEmail()) ?? 'your account'}.`);
+          }
+        } catch (err: any) {
+          void vscode.window.showErrorMessage(`Sign-in failed: ${err?.message ?? err}`);
         }
       },
     })

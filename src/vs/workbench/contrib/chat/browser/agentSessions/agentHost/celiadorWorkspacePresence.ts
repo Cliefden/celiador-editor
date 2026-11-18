@@ -8,12 +8,14 @@ import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { joinPath } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
+import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
 import { IAuthenticationService } from '../../../../../services/authentication/common/authentication.js';
+import { getCeliadorDaemonUrl } from './celiadorDaemonUrl.js';
 
 /**
  * Celiador: heartbeat the repos currently open in this editor to the daemon, so the
@@ -30,7 +32,6 @@ export class CeliadorWorkspacePresence extends Disposable implements IWorkbenchC
 
 	/** Must match the auth provider id registered by the celiador-ai extension. */
 	private static readonly AUTH_PROVIDER_ID = 'celiador';
-	private static readonly FALLBACK_DAEMON_URL = 'https://celiador.ai';
 	/** Re-publish every 30s; the daemon's TTL is ~3× this, so a blip doesn't drop us. */
 	private static readonly HEARTBEAT_MS = 30_000;
 
@@ -43,6 +44,7 @@ export class CeliadorWorkspacePresence extends Disposable implements IWorkbenchC
 		@IAuthenticationService private readonly _authenticationService: IAuthenticationService,
 		@IProductService private readonly _productService: IProductService,
 		@ILogService private readonly _logService: ILogService,
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
 	) {
 		super();
 		const timer = this._register(new IntervalTimer());
@@ -52,7 +54,7 @@ export class CeliadorWorkspacePresence extends Disposable implements IWorkbenchC
 	}
 
 	private _daemonUrl(): string {
-		return (this._productService.celiadorDaemonUrl ?? CeliadorWorkspacePresence.FALLBACK_DAEMON_URL).replace(/\/+$/, '');
+		return getCeliadorDaemonUrl(this._productService, this._configurationService);
 	}
 
 	private async _token(): Promise<string | undefined> {

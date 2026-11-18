@@ -33,7 +33,7 @@ export interface ProductIdentity {
 	version?: string;
 	commit?: string;
 	build?: number;
-	/** The build's own daemon URL — what the native agent host and relay use, setting or not. */
+	/** The build's own daemon URL — what the native agent host's gateway uses, setting or not. */
 	daemonUrl: string;
 }
 
@@ -55,7 +55,10 @@ function product(): ProductChannelFields {
 /**
  * Resolve the daemon base URL for this build.
  * Order: explicit user-scope `celiador.daemonUrl` setting → product.json `celiadorDaemonUrl`
- * → hardcoded prod fallback. Trailing slashes are stripped.
+ * → hardcoded prod fallback. Trailing slashes are stripped. The workbench's relay,
+ * presence heartbeat and editor control apply the same rule
+ * (`getCeliadorDaemonUrl` in `src/vs/.../agentHost/celiadorDaemonUrl.ts`); keep
+ * the two in step.
  */
 export function resolveDaemonUrl(): string {
   // User/global scope only — a workspace must not be able to redirect the token.
