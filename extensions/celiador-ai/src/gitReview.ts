@@ -99,12 +99,9 @@ function pickRemote(repo: GitRepository): GitRemote | undefined {
   return (upstream ? remotes.find((r) => r.name === upstream) : undefined) ?? remotes.find((r) => r.name === 'origin') ?? remotes[0];
 }
 
-/** `owner/repo` from a GitHub remote URL (https or ssh); undefined for other hosts. */
-export function parseGitHubRemote(url: string | undefined): { owner: string; repo: string } | undefined {
-  if (!url) {return undefined;}
-  const m = /^(?:https?:\/\/(?:[^@/]+@)?github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url.trim());
-  return m ? { owner: m[1], repo: m[2] } : undefined;
-}
+// `owner/repo` from a GitHub remote URL; lives in its own module so it can be unit tested.
+import { parseGitHubRemote } from './githubRemote';
+export { parseGitHubRemote };
 
 /**
  * The GitHub CLI's token, when `gh` is installed and signed in. Agent task runs
