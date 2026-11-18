@@ -9,9 +9,15 @@ import { Disposable, DisposableStore, IReference } from '../../../../../../base/
 import { isEqualOrParent, joinPath } from '../../../../../../base/common/resources.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../../base/common/uuid.js';
+import { localize } from '../../../../../../nls.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
-import { IFileService } from '../../../../../../platform/files/common/files.js';
+import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
+import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../../../platform/configuration/common/configurationRegistry.js';
+import { FileSystemProviderErrorCode, IFileService, toFileSystemProviderErrorCode } from '../../../../../../platform/files/common/files.js';
+import { INotificationService, Severity } from '../../../../../../platform/notification/common/notification.js';
+import { Registry } from '../../../../../../platform/registry/common/platform.js';
 import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
+import { IWorkspaceTrustManagementService } from '../../../../../../platform/workspace/common/workspaceTrust.js';
 import { IAgentHostConnectionsService, LOCAL_AGENT_HOST_SCHEME_PREFIX } from '../../../../../../platform/agentHost/common/agentHostConnectionsService.js';
 import { celiadorMirrorKey } from '../../../../../../platform/agentHost/common/celiadorMirror.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
@@ -30,7 +36,31 @@ import { ChatSessionStatus } from '../../../common/chatSessionsService.js';
 import { isAgentHostTarget } from '../agentSessions.js';
 import { IAgentSessionsService } from '../agentSessionsService.js';
 import { CeliadorRelayClient, ICeliadorRelayClientOptions, IRelayGitArgs, RelayFsKind, RelayGitKind, summarizeRelayToolInput } from './celiadorRelayClient.js';
+import { isRelayReadDenied, isRelayWriteDenied, parseRelayPath } from './celiadorRelayPaths.js';
 import { getCeliadorTaskRun } from './celiadorTaskRuns.js';
+
+/**
+ * Celiador: whether the companion phone may change files on this computer
+ * (`fs.write` and `git.revert`). On by default: editing a file from the phone is
+ * a core part of reviewing a run, and the relay already refuses untrusted
+ * workspaces, symbolic links and the folders where a change would run code here
+ * (see celiadorRelayPaths.ts). Application scope, so a workspace cannot turn it
+ * back on once the user turned it off.
+ */
+const PHONE_FILE_WRITES_SETTING = 'celiador.phone.allowFileWrites';
+
+Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
+	id: 'celiador',
+	title: localize('celiador.configuration.title', "Celiador"),
+	properties: {
+		[PHONE_FILE_WRITES_SETTING]: {
+			type: 'boolean',
+			default: true,
+			scope: ConfigurationScope.APPLICATION,
+			description: localize('celiador.phone.allowFileWrites', "Allow the Celiador companion app to save and discard file changes in your workspace. Reading files and reviewing changes from the phone keep working when this is off. The phone can never change git internals, editor or agent configuration, or files behind symbolic links, and nothing from the phone runs in Restricted Mode."),
+		},
+	},
+});
 
 type PhoneCommandClassification = {
 	command: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Which steering command the companion phone sent: cancel, approve, reject, instruct, answer, fs.*, git.*.' };
@@ -138,6 +168,9 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 		@IWorkspaceContextService private readonly _workspaceService: IWorkspaceContextService,
 		@ICommandService private readonly _commandService: ICommandService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
+		@IWorkspaceTrustManagementService private readonly _workspaceTrustService: IWorkspaceTrustManagementService,
+		@INotificationService private readonly _notificationService: INotificationService,
 	) {
 		super();
 		// Accessing `.model` lazily resolves all session providers; its change event
@@ -631,6 +664,10 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 	 * A phone file-browser request arrived (list / read / write). Perform it against
 	 * the real workspace via the file service, scoped to the first workspace folder,
 	 * and publish the answer back as an `fs.result` carrying the same `requestId`.
+	 *
+	 * Only in a trusted workspace, never through a symbolic link, never inside git
+	 * internals, and writes only outside the folders where a change would run code
+	 * on this computer ({@link isRelayWriteDenied}) and while the user allows them.
 	 */
 	private async _handleFsCommand(key: string, kind: RelayFsKind, requestId: string, path: string, content: string | undefined): Promise<void> {
 		const client = this._clients.get(key);
@@ -638,19 +675,17 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			return;
 		}
 		try {
+			this._assertPhoneMayAct(kind === 'fs.write');
 			// Celiador: an agent task's run browses its own worktree, not the window's checkout.
 			const root = getCeliadorTaskRun(key)?.worktree ?? this._workspaceService.getWorkspace().folders[0]?.uri;
 			if (!root) {
 				throw new Error('no workspace open');
 			}
-			const target = this._resolveInWorkspace(root, path);
-			if (!target) {
-				throw new Error('bad path');
-			}
+			const target = await this._resolveInWorkspace(root, path, kind === 'fs.write');
 			if (kind === 'fs.list') {
 				const stat = await this._fileService.resolve(target);
 				const entries = (stat.children ?? [])
-					.filter(child => child.name !== '.git')
+					.filter(child => !isRelayReadDenied([child.name]))
 					.map(child => ({ name: child.name, type: child.isDirectory ? 'dir' : 'file', size: child.size }))
 					.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
 				client.publish({ kind: 'fs.result', requestId, ok: true, entries });
@@ -667,6 +702,11 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			} else {
 				await this._fileService.writeFile(target, VSBuffer.fromString(content ?? ''));
 				client.publish({ kind: 'fs.result', requestId, ok: true });
+				this._notificationService.notify({
+					severity: Severity.Info,
+					source: localize('celiador.relay.source', "Celiador"),
+					message: localize('celiador.relay.phoneSaved', "Your phone saved {0}.", parseRelayPath(path)?.join('/') ?? path),
+				});
 			}
 		} catch (err) {
 			client.publish({ kind: 'fs.result', requestId, ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -685,24 +725,73 @@ export class CeliadorRelayBridge extends Disposable implements IWorkbenchContrib
 			return;
 		}
 		try {
+			// git.revert discards working-tree changes: it is a write like fs.write.
+			this._assertPhoneMayAct(kind === 'git.revert');
 			const result = await this._commandService.executeCommand<{ ok: boolean;[key: string]: unknown }>('celiador.relayGit', { kind, ...args, root: getCeliadorTaskRun(key)?.worktree?.fsPath }); // Celiador: a task run's own worktree
 			if (!result) {
 				throw new Error('run review is unavailable');
 			}
 			client.publish({ ...result, kind: 'fs.result', requestId });
+			if (kind === 'git.revert' && result.ok) {
+				this._notificationService.notify({
+					severity: Severity.Info,
+					source: localize('celiador.relay.source', "Celiador"),
+					message: localize('celiador.relay.phoneReverted', "Your phone discarded the changes in {0}.", (args.paths ?? []).join(', ')),
+				});
+			}
 		} catch (err) {
 			client.publish({ kind: 'fs.result', requestId, ok: false, error: err instanceof Error ? err.message : String(err) });
 		}
 	}
 
-	/** Resolve a workspace-relative path under `root`, rejecting any `..` escape. */
-	private _resolveInWorkspace(root: URI, rel: string): URI | undefined {
-		const segments = (rel ?? '').split('/').filter(segment => segment.length > 0 && segment !== '.');
-		if (segments.some(segment => segment === '..')) {
-			return undefined;
+	/**
+	 * Throws unless the phone may act on this workspace: never in Restricted Mode,
+	 * and writes only while {@link PHONE_FILE_WRITES_SETTING} allows them.
+	 */
+	private _assertPhoneMayAct(write: boolean): void {
+		if (!this._workspaceTrustService.isWorkspaceTrusted()) {
+			throw new Error('this workspace is not trusted on the computer');
+		}
+		if (write && this._configurationService.getValue<boolean>(PHONE_FILE_WRITES_SETTING) === false) {
+			throw new Error('changing files from the phone is turned off on the computer');
+		}
+	}
+
+	/**
+	 * Resolve a workspace-relative phone path under `root`. Rejects `..` escapes,
+	 * git internals, the folders and files writes may not touch (for a write), and
+	 * any path that goes through a symbolic link, so a link inside the workspace
+	 * cannot reach files outside it.
+	 */
+	private async _resolveInWorkspace(root: URI, rel: string, write: boolean): Promise<URI> {
+		const segments = parseRelayPath(rel);
+		if (!segments) {
+			throw new Error('bad path');
+		}
+		if (isRelayReadDenied(segments) || (write && isRelayWriteDenied(segments))) {
+			throw new Error('the phone cannot access this path');
 		}
 		const target = segments.length ? joinPath(root, ...segments) : root;
-		return isEqualOrParent(target, root) ? target : undefined;
+		if (!isEqualOrParent(target, root)) {
+			throw new Error('bad path');
+		}
+		let current = root;
+		for (const segment of segments) {
+			current = joinPath(current, segment);
+			try {
+				const stat = await this._fileService.stat(current);
+				if (stat.isSymbolicLink) {
+					throw new Error('the phone cannot follow symbolic links');
+				}
+			} catch (err) {
+				// IFileService.stat surfaces the provider's own error.
+				if (toFileSystemProviderErrorCode(err instanceof Error ? err : undefined) === FileSystemProviderErrorCode.FileNotFound) {
+					break; // a new file (or folder) to create: nothing below it exists yet
+				}
+				throw err;
+			}
+		}
+		return target;
 	}
 
 	/** Publish a status change; only once the relay session is live, and only on change. */
