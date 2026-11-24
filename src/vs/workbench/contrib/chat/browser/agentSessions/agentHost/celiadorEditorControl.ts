@@ -322,11 +322,15 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 
 	private _backoff(): Promise<void> {
 		return new Promise<void>(resolve => {
-			const timer = setTimeout(resolve, CeliadorEditorControl.RECONNECT_MS);
-			this._cts.token.onCancellationRequested(() => {
+			// The cancellation listener lives only as long as this wait, or one would pile up per retry.
+			const listener = this._cts.token.onCancellationRequested(() => {
 				clearTimeout(timer);
 				resolve();
 			});
+			const timer = setTimeout(() => {
+				listener.dispose();
+				resolve();
+			}, CeliadorEditorControl.RECONNECT_MS);
 		});
 	}
 
@@ -403,6 +407,15 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		}
 	}
 
+	/** Whether `branch` already exists in the repository at `repoRoot` (false when unknown). */
+	private async _branchExists(repoRoot: URI, branch: string): Promise<boolean> {
+		try {
+			return await this._commandService.executeCommand<boolean>('celiador.taskBranchExists', { repoRoot: repoRoot.fsPath, branch }) === true;
+		} catch {
+			return false;
+		}
+	}
+
 	private async _machineName(): Promise<string | undefined> {
 		// Not cached while unknown: the extension may not have activated yet.
 		this._machine ??= (await this._taskContext()).machine;
@@ -422,6 +435,15 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 		const folder = (await this._repoForRemote(cmd.remoteUrl))?.folder;
 		if (!folder) {
 			return; // another window (or none) has this repo
+		}
+		// The run needs the task's exact branch: the daemon tracks its pull request and
+		// merge by that name, and finishing looks the worktree up by it. A taken name
+		// would put the run on a generated branch and finish someone else's worktree.
+		// Not reported as failed: another window with this repo open may be starting
+		// this very task; the daemon re-queues (then fails) a task nobody reports on.
+		if (await this._branchExists(folder, cmd.branch)) {
+			this._logService.warn(`[celiador-control] task ${cmd.taskId}: not started, the branch ${cmd.branch} already exists in ${folder.fsPath} (delete it, or its worktree, to run the task here)`);
+			return;
 		}
 		this._handled.add(cmd.taskId);
 		try {
@@ -548,6 +570,7 @@ export class CeliadorEditorControl extends Disposable implements IWorkbenchContr
 			}
 			const result = await this._commandService.executeCommand<{ ok: boolean; url?: string; error?: string; pr?: ITaskPullRequest }>('celiador.finishTask', {
 				root: worktree.fsPath,
+				expectedBranch: run.branch,
 				title: run.title,
 				issue: run.issue,
 				attribution: this._configurationService.getValue<boolean>(TASK_ATTRIBUTION_SETTING) === true,
