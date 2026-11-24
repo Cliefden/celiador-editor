@@ -405,6 +405,8 @@ export function registerGitReview(): vscode.Disposable {
 interface FinishTaskArgs {
   /** The run's worktree. */
   root: string;
+  /** The task's branch: the worktree must be on it, or nothing is committed or pushed. */
+  expectedBranch?: string;
   title: string;
   issue?: { number: number; url: string };
   /** Add the opt-in "made with Celiador" line to the pull request body. */
@@ -488,6 +490,11 @@ async function finishTask(args: FinishTaskArgs): Promise<GitReviewResult> {
   await repo.status();
   const branch = repo.state.HEAD?.name;
   if (!branch) {return { ok: false, error: 'the run left a detached HEAD' };}
+  // Only ever commit and push the task's own branch: a worktree on another branch
+  // isn't this run's work.
+  if (args.expectedBranch && branch !== args.expectedBranch) {
+    return { ok: false, error: `the worktree is on ${branch}, not the task's branch ${args.expectedBranch}` };
+  }
   const leftovers = changedFiles(repo);
   if (leftovers.length) {
     await repo.add(leftovers.map((f) => absPath(repo, f.path)));
@@ -531,6 +538,16 @@ export function registerTaskCommands(): vscode.Disposable {
         return await worktreeForBranch(args.repoRoot, args.branch);
       } catch {
         return undefined;
+      }
+    }),
+    // Whether a local branch already has this name: a task's run needs its exact
+    // branch, which the daemon tracks the pull request and merge by.
+    vscode.commands.registerCommand('celiador.taskBranchExists', async (args: { repoRoot: string; branch: string }): Promise<boolean> => {
+      try {
+        await runGit(args.repoRoot, ['rev-parse', '--verify', '--quiet', `refs/heads/${args.branch}`]);
+        return true;
+      } catch {
+        return false;
       }
     }),
     // What the editor control reports alongside a task: this computer's name and
