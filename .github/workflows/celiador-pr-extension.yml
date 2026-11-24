@@ -4,9 +4,12 @@ name: Celiador PR (celiador-ai)
 # type check) and the node:test unit tests. The extension is a member of the
 # root pnpm workspace; a filtered install fetches only its own dependencies, so
 # this needs no full root install and takes about a minute on a hosted runner.
+# A draft PR runs nothing (`wb pr` opens drafts); `gh pr ready` starts it.
 
 on:
   pull_request:
+    # ready_for_review: a draft marked ready runs its checks.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'extensions/celiador-ai/**'
       - 'extensions/tsconfig.base.json'
@@ -31,6 +34,7 @@ permissions:
 jobs:
   celiador-ai:
     name: celiador-ai compile and unit tests
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
