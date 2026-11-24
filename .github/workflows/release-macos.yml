@@ -28,7 +28,9 @@ on:
         default: prod
 
 concurrency:
-  group: ${{ github.workflow }}
+  # Shared with release-linux.yml: both read, merge and rewrite the one published
+  # manifest, so two releases at once would drop each other's entry.
+  group: celiador-release-manifest
   cancel-in-progress: false
 
 permissions:
