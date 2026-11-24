@@ -118,7 +118,10 @@ echo "    $NAME.rpm     $RPM_SHA"
 
 # ── Manifest: this build's entry, merged into the current published manifest ─
 log "Writing manifest"
-CURRENT="$(curl -fsS --max-time 20 "$MANIFEST_URL" 2>/dev/null || echo '{"releases":[]}')"
+# A failed fetch is an error, never "no releases yet" — publishing a manifest
+# built from an empty list would drop every other release from the feed.
+CURRENT="$(curl -fsS --max-time 20 --retry 3 --retry-all-errors "$MANIFEST_URL")" \
+  || die "couldn't fetch the published manifest from $MANIFEST_URL; not writing one that would drop the other releases"
 CURRENT="$CURRENT" NOTES="$NOTES" node - "$OUT" "$NAME" "$PLATFORM" "$QUALITY" "$COMMIT" "$PRODUCT_VERSION" "$BUILD_TS" "$TGZ_SHA" "$DEB_SHA" "$RPM_SHA" "$SHORT" <<'JS'
 const fs = require("fs");
 const [out, name, platform, quality, version, productVersion, ts, tgzSha, debSha, rpmSha, short] = process.argv.slice(2);
@@ -129,7 +132,10 @@ const entry = {
   ...(process.env.NOTES ? { notes: process.env.NOTES } : {}),
 };
 let current = [];
-try { current = JSON.parse(process.env.CURRENT || "{}").releases || []; } catch { current = []; }
+current = JSON.parse(process.env.CURRENT).releases;
+if (!Array.isArray(current)) {
+  throw new Error("the published manifest has no releases list; not writing one that would drop the other releases");
+}
 // The site's listing adds absolute URLs; the manifest on disk stores names only.
 const strip = ({ archiveUrl, dmgUrl, assetUrls, ...rest }) => rest;
 const releases = [entry, ...current.map(strip).filter(e => !(e.platform === platform && e.quality === quality && e.version === version))]
