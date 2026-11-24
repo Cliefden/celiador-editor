@@ -19,8 +19,11 @@ build/celiador/channel.sh prod        # restore before committing anything
 | Channel | `nameLong` | `applicationName` | `dataFolderName` | `darwinBundleIdentifier` | `urlProtocol` | `celiadorDaemonUrl` = `updateUrl` | `quality` | Built |
 |---|---|---|---|---|---|---|---|---|
 | **prod** | Celiador | celiador | .celiador | ai.celiador.editor | celiador | `https://celiador.ai` | stable | manual *Release (macOS)* |
-| **test** | Celiador Test | celiador-test | .celiador-test | ai.celiador.editor.test | celiador-test | `https://test.celiador.ai` | insider | on a daemon release tag, or manual |
-| **dev** | Celiador Dev | celiador-dev | .celiador-dev | ai.celiador.editor.dev | celiador-dev | `https://dev.celiador.ai` | insider | nightly from `main`, or manual |
+| **test** | Celiador Test | celiador-test | .celiador-test | ai.celiador.editor.test | celiador-test | `https://test.celiador.ai` | insider | on a `Cliefden/celiador` release tag (`main`, labelled with the tag), or manual |
+| **dev** | Celiador Dev | celiador-dev | .celiador-dev | ai.celiador.editor.dev | celiador-dev | `https://dev.celiador.ai` | insider | nightly from `main` (skipped when unchanged), or manual |
+
+All three run `.github/workflows/release-macos.yml`; how the automatic triggers
+work is in `docs/RELEASING.md` § Channels.
 
 `celiadorDaemonUrl` is read in three places, so one value switches the whole client:
 - the `celiador-ai` extension (`resolveDaemonUrl()` — the `celiador.daemonUrl` setting

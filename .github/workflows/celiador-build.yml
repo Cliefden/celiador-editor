@@ -3,19 +3,18 @@ name: Celiador Build
 # Builds the Celiador desktop app for macOS, Windows and Linux.
 # Runs ONLY on demand, because hosted multi-platform builds are expensive (Windows
 # minutes bill at 2x, Linux at 1x):
-# - Manual run (Actions > Celiador Build > Run workflow): pick one platform or all; the
-#   packages are uploaded as workflow artifacts.
-# - Pushing a tag like v0.1.0 builds every platform and attaches the packages to a draft
-#   GitHub release.
+# - Manual run only (Actions > Celiador Build > Run workflow): pick one platform or all;
+#   the packages are uploaded as workflow artifacts. Run it on a v* tag with "all" to
+#   also attach them to a draft GitHub release.
+# Tag pushes no longer start it: those packages are unsigned prod builds, which is not
+# what a tag should produce. Signed, published builds come from release-macos.yml /
+# release-linux.yml (CHANNELS.md, docs/RELEASING.md).
 # The macOS job runs on the self-hosted runner "scw-mac" (labels self-hosted/macOS/ARM64)
 # instead of a hosted macos-15 image: hosted macOS bills at 10x and burned through the
 # account's Actions quota. Self-hosted minutes are never billed; the Mac must be awake.
 # Day-to-day validation happens locally (scripts/test.sh, typecheck, a local packaged build).
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       platform:
@@ -41,7 +40,7 @@ env:
 jobs:
   linux:
     name: Linux (${{ matrix.arch }})
-    if: github.event_name == 'push' || inputs.platform == 'linux' || inputs.platform == 'all'
+    if: inputs.platform == 'linux' || inputs.platform == 'all'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     strategy:
@@ -176,7 +175,7 @@ jobs:
 
   windows:
     name: Windows (${{ matrix.arch }})
-    if: github.event_name == 'push' || inputs.platform == 'windows' || inputs.platform == 'all'
+    if: inputs.platform == 'windows' || inputs.platform == 'all'
     runs-on: windows-2022
     timeout-minutes: 180
     strategy:
@@ -276,7 +275,7 @@ jobs:
 
   macos:
     name: macOS (${{ matrix.arch }})
-    if: github.event_name == 'push' || inputs.platform == 'macos' || inputs.platform == 'all'
+    if: inputs.platform == 'macos' || inputs.platform == 'all'
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 180
     strategy:
@@ -393,7 +392,7 @@ jobs:
 
   release:
     name: Draft release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && inputs.platform == 'all'
     needs: [linux, windows, macos]
     runs-on: ubuntu-24.04
     permissions:
