@@ -1,14 +1,24 @@
-# Read by `wb` (github.com/Cliefden/workbench) — worktrees, board, dev stack.
+# Read by `wb` (github.com/Cliefden/workbench) — worktrees, board, merge
+# trains. The manual is workbench's WORKTREES.md.
 #
-# NOTE: editor worktrees are EXPENSIVE — the npm install builds native modules
-# (several GB, several minutes per worktree). Reserve them for long-lived
-# parallel tracks (an upstream rebase beside feature work); for small fixes,
-# work on a branch in the main checkout's siblings instead.
+# Editor worktrees are big: the install builds native modules per worktree
+# (pnpm's store makes the downloads shared, the native builds are not). Never
+# share or symlink node_modules between worktrees (.claude/CLAUDE.md).
+#
+# GitHub refuses to link branches to issues here (CreateLinkedBranch); `wb`
+# then names the branch <issue#>-<title>, which links it the same way.
 WB_PROJECT="Celiador"
 
 wb_setup() {
+  # Node from .nvmrc, pnpm from package.json's packageManager (via corepack).
   DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-    fnm exec --using 24.18.0 npm install
+    fnm exec --using "$(cat .nvmrc)" corepack pnpm install
 }
+
+# `wb issue` offers these area labels and guesses one from the text.
+WB_AREAS=(
+  "extension=extension|celiador-ai|chat|agent|relay|phone|daemon|sign in|auth"
+  "core=core|workbench|src/vs|agents window|updater|build|gulp|electron|upstream"
+)
 
 # No WB_SERVICES: the built app is packaged with gulp, not run as a service.
