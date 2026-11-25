@@ -9,6 +9,7 @@ import { registerCeliadorAuthProvider } from './authProvider';
 import { CeliadorChangesViewProvider } from './changesView';
 import { CeliadorWelcomeViewProvider } from './welcomeView';
 import { DaemonApi, type Me } from './api';
+import type { Health } from './contract';
 import { registerGitReview, registerTaskCommands } from './gitReview';
 import { registerInlineCompletions } from './inlineCompletionsProvider';
 import { registerEnvironmentStatus } from './environmentStatus';
@@ -65,8 +66,10 @@ async function probeDaemon(): Promise<string> {
   const url = daemonUrl();
   const res = await fetch(`${url}/api/health`, { headers: { Accept: 'application/json' } });
   if (!res.ok) {throw new Error(`/api/health → HTTP ${res.status}`);}
-  const health: any = await res.json();
-  return `Connected to ${url} (status: ${health?.status ?? health?.ok ?? 'ok'}).`;
+  // `GET /api/health` has no `status` field (it used to be read here, so this said "status: true").
+  const health = (await res.json().catch(() => undefined)) as Partial<Health> | undefined;
+  const about = [health?.version ? `v${health.version}` : undefined, health?.env ? `env ${health.env}` : undefined].filter(Boolean).join(', ');
+  return `Connected to ${url}${about ? ` (${about})` : ''}.`;
 }
 
 export function activate(context: vscode.ExtensionContext): void {

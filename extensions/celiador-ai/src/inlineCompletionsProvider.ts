@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
 import type { Auth } from './auth';
+import type { CompleteRequest, CompleteResponse } from './contract';
 import { resolveDaemonUrl } from './productConfig';
 
 // Experimental "Tab autocomplete": a model-backed inline-completion provider
@@ -78,11 +79,11 @@ class CeliadorInlineCompletionProvider implements vscode.InlineCompletionItemPro
       const res = await fetch(`${resolveDaemonUrl()}/api/complete`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ prefix, suffix, language }),
+        body: JSON.stringify({ prefix, suffix, language } satisfies CompleteRequest),
         signal: controller.signal,
       });
       if (!res.ok) {return undefined;} // 429/502 etc. — silently skip this suggestion
-      const data = (await res.json()) as { completion?: string };
+      const data = (await res.json()) as Partial<CompleteResponse>;
       const text = data.completion ?? '';
       return text.length > 0 ? text : undefined;
     } catch {

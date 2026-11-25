@@ -212,7 +212,9 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "pnpm run compile",
-    "test:unit": "tsc -p ./ && node --test out/test/unit/*.test.js"
+    "test:unit": "tsc -p ./ && node --test out/test/unit/*.test.js",
+    "sync-contract": "node scripts/sync-contract.mjs",
+    "check-contract": "node scripts/sync-contract.mjs --check"
   },
   "devDependencies": {
     "@types/glob": "^8.1.0",

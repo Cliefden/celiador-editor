@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import * as vscode from 'vscode';
 import type { Auth } from '../auth';
+import type { CreateTaskRequest, TaskStatusReport } from '../contract';
 import type { SessionEvent, Task, TaskList } from './model';
 
 // The Agents view's line to the daemon's task queue (agents UI contract §1/§3):
@@ -58,7 +59,7 @@ export class TasksClient {
   }
 
   /** Queue a task; `deduped` = that issue already had an open task, which comes back instead. */
-  async create(input: { remoteUrl: string; title: string; details?: string; issue?: { number: number; title: string; url: string } }): Promise<{ task?: Task; deduped: boolean }> {
+  async create(input: CreateTaskRequest): Promise<{ task?: Task; deduped: boolean }> {
     const body = await this.json<{ task?: Task; deduped?: boolean }>('/api/tasks', { method: 'POST', body: JSON.stringify(input) });
     return { task: body.task, deduped: body.deduped === true };
   }
@@ -88,7 +89,7 @@ export class TasksClient {
 
   /** Tell the daemon a task's PR was merged here (the relay fallback merge). */
   async reportMerged(taskId: string): Promise<void> {
-    await this.json(`/api/tasks/${encodeURIComponent(taskId)}/status`, { method: 'POST', body: JSON.stringify({ state: 'merged' }) });
+    await this.json(`/api/tasks/${encodeURIComponent(taskId)}/status`, { method: 'POST', body: JSON.stringify({ state: 'merged' } satisfies TaskStatusReport) });
   }
 
   /** Stream a relay session's event log (replay, then live) until `signal` aborts. */

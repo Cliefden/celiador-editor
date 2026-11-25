@@ -3,55 +3,27 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import type { Auth } from './auth';
+import type * as contract from './contract';
 
 // Thin client for the daemon's app-data endpoints (profile + chat history). The
 // editor talks to the DB THROUGH the daemon — never PostgREST directly. Auth is
 // the shared Supabase Bearer token; refresh once on a 401 and retry.
+//
+// The response shapes are the daemon's generated contract (src/contract).
 
-export interface Profile {
-  id: string;
-  email?: string;
-  display_name?: string;
-  avatar_url?: string;
-  plan: string;
-  settings: Record<string, unknown>;
-}
-
-export interface ChatSummary {
-  id: string;
-  title?: string;
-  origin: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-  last_message_at?: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  role: string;
-  content: { text?: string } | Record<string, unknown>;
-  seq?: number;
-  created_at: string;
-}
-
+export type Profile = contract.Profile;
+export type ChatSummary = contract.Chat;
+export type ChatMessage = contract.ChatMessage;
 /** Today's agent usage counters (UTC day), as metered by the daemon's quota tracker. */
-export interface Usage {
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-}
-
+export type Usage = contract.DayUsage;
 /** Active per-user daily limits. A `0` means that limit is disabled (unlimited). */
-export interface Limits {
-  rpm: number;
-  concurrency: number;
-  dailyRequests: number;
-  dailyInput: number;
-  dailyOutput: number;
-}
+export type Limits = contract.UserLimits;
 
-/** Dollar balance for the account (Stripe-backed; Phase 5 slice 2). Absent until billing lands. */
+/**
+ * Dollar balance for the account (Stripe-backed; Phase 5 slice 2). NOT part of
+ * the daemon's contract yet: no daemon sends it, so the balance status item
+ * stays hidden. Kept as the shape this client will read once billing lands.
+ */
 export interface Balance {
   plan: string;
   planLabel: string;
@@ -62,18 +34,8 @@ export interface Balance {
   period: string;
 }
 
-/** GET /api/me — signed-in account summary: identity, plan, usage vs. quota. */
-export interface Me {
-  userId: string;
-  email: string | null;
-  /** Billing plan, or null in token/none (self-host/dev) mode or before a profile row exists. */
-  plan: string | null;
-  usage: Usage;
-  limits: Limits;
-  /** ISO timestamp when the daily usage counters reset (next UTC midnight). */
-  resetsAt: string;
-  balance?: Balance;
-}
+/** GET /api/me — signed-in account summary: identity, plan, usage vs. quota (plus the future `balance`). */
+export type Me = contract.Me & { balance?: Balance };
 
 export class DaemonApi {
   constructor(private readonly auth: Auth, private readonly getUrl: () => string) {}
@@ -101,7 +63,7 @@ export class DaemonApi {
     return (await this.call<{ profile: Profile }>('/api/profile')).profile;
   }
 
-  async updateProfile(patch: { display_name?: string; settings?: Record<string, unknown> }): Promise<Profile> {
+  async updateProfile(patch: contract.ProfilePatch): Promise<Profile> {
     return (await this.call<{ profile: Profile }>('/api/profile', { method: 'PATCH', body: JSON.stringify(patch) })).profile;
   }
 
