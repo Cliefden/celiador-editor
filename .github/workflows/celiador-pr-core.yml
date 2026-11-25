@@ -69,16 +69,14 @@ jobs:
           ./build/azure-pipelines/linux/apt-retry.sh sudo apt-get install -y \
             pkg-config libxkbfile-dev libkrb5-dev libsecret-1-dev
 
-      - name: Restore node_modules cache
-        id: cache-node-modules
-        uses: ./.github/actions/restore-node-modules
+      - name: Restore pnpm store cache
+        id: cache-pnpm-store
+        uses: ./.github/actions/restore-pnpm-store
         with:
-          key-prefix: celiador-node_modules-pr-linux
-          key-args: "linux x64 $(node -p process.arch)"
+          key-prefix: celiador-pnpm-store-pr-linux
 
       # One install: the root postinstall also installs the build/ and remote/ roots.
       - name: Install dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: |
           set -e
           for i in {1..5}; do
@@ -90,19 +88,20 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
 
-      - name: Save node_modules cache
-        if: steps.cache-node-modules.outputs.cache-hit != 'true' && github.event_name == 'push'
-        uses: ./.github/actions/save-node-modules
+      - name: Save pnpm store cache
+        if: steps.cache-pnpm-store.outputs.cache-hit != 'true' && github.event_name == 'push'
+        uses: ./.github/actions/save-pnpm-store
 
       - name: Electron typings
-        # postinstall downloads these; a cache hit skips postinstall. Idempotent and checksummed.
+        # postinstall downloads these already; kept as a cheap, checksummed safety net.
         run: node build/npm/electronTypes.ts
 
-      - name: ESLint changed files
-        # The wrapper diffs against the PR base itself and skips files eslint.config.js
-        # ignores. Passing the files on the command line breaks on an upstream sync:
-        # thousands of paths overflow `pnpm run`'s single `sh -c` string (128 KB on Linux).
-        run: node --max-old-space-size=8192 build/eslint.ts --changed-since HEAD^1
+      - name: Lint changed files
+        # oxlint with the rules of eslint.config.js (upstream removed the ESLint runner).
+        # The wrapper diffs against the PR base itself and skips ignored files. Passing the
+        # files on the command line breaks on an upstream sync: thousands of paths overflow
+        # `pnpm run`'s single `sh -c` string (128 KB on Linux).
+        run: node --max-old-space-size=8192 build/oxlint.ts --changed-since HEAD^1
 
       - name: Typecheck client
         run: pnpm run typecheck-client

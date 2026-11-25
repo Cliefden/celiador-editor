@@ -102,6 +102,7 @@ import { ContributionEnablementState, IEnablementModel } from '../../../common/e
 import { AgentHostMcpServerDelivery } from '../../../browser/agentSessions/agentHost/agentHostMcpServerSupport.js';
 import { IUriIdentityService } from '../../../../../../platform/uriIdentity/common/uriIdentity.js';
 import { mintedTestChatOwner } from '../../../../../../platform/agentHost/test/common/mintedChatUri.js';
+import { testIWorkspace } from '../../../../../../platform/workspace/test/common/testWorkspace.js';
 
 // =============================================================================
 // Unit tests for toolDataToDefinition and toolResultToProtocol
@@ -142,13 +143,15 @@ suite('AgentHostClientTools', () => {
 		} as Partial<IConfigurationService> as IConfigurationService);
 		instantiationService.stub(IConfigurationResolverService, {} as Partial<IConfigurationResolverService>);
 		instantiationService.stub(IWorkbenchEnvironmentService, { remoteAuthority: mcpOptions?.remoteAuthority });
+		const promptListings: string[] = [];
 		instantiationService.stub(IPromptsService, new class extends mock<IPromptsService>() {
 			override readonly onDidChangeCustomAgents = Event.None;
 			override readonly onDidChangeSlashCommands = Event.None;
 			override readonly onDidChangeSkills = Event.None;
 			override readonly onDidChangeInstructions = Event.None;
 			override getDisabledPromptFiles() { return new ResourceSet(); }
-			override async listPromptFilesForStorage() {
+			override async listPromptFilesForStorage(type: string, storage: string) {
+				promptListings.push(`${type}:${storage}`);
 				return [];
 			}
 		}());
@@ -167,11 +170,15 @@ suite('AgentHostClientTools', () => {
 			onChange: Event.None,
 			whenInitialLocalMcpServersLoaded: Promise.resolve(),
 		} as Partial<IMcpWorkbenchService> as IMcpWorkbenchService);
+		let fullReferenceNameSnapshots = 0;
 		instantiationService.stub(ILanguageModelToolsService, {
 			observeTools: () => tools,
 			toolSets,
 			getTool: id => (registeredTools ?? tools.get()).find(tool => tool.id === id),
-			getFullReferenceName: tool => fullReferenceNames?.get(tool.id) ?? tool.id,
+			createFullReferenceNameResolver: () => {
+				fullReferenceNameSnapshots++;
+				return tool => fullReferenceNames?.get(tool.id) ?? tool.id;
+			},
 		} as Partial<ILanguageModelToolsService> as ILanguageModelToolsService);
 		instantiationService.stub(IAgentHostToolSetEnablementService, {
 			observe: () => constObservable<IToolEnablementState>({ toolSets: new Map(), tools: new Map() }),
@@ -181,7 +188,7 @@ suite('AgentHostClientTools', () => {
 		});
 
 		const service = disposables.add(instantiationService.createInstance(AgentHostActiveClientService));
-		return { service };
+		return { service, promptListings, getFullReferenceNameSnapshots: () => fullReferenceNameSnapshots };
 	}
 
 	test('lazily creates scopes and shares them for equivalent root sets', async () => {
@@ -223,6 +230,15 @@ suite('AgentHostClientTools', () => {
 			syncProviderIsStable: true,
 			scopeAfterReleaseIsResolved: true,
 		});
+	});
+
+	test('lists each kind of customization once when it resolves a scope', async () => {
+		const { service, promptListings } = createActiveClientService();
+		const scope = service.acquireScope('agent-host-claude', [URI.file('/repo')]);
+		await scope.whenResolved();
+		scope.dispose();
+
+		assert.deepStrictEqual(promptListings.filter((listing, index) => promptListings.indexOf(listing) !== index), []);
 	});
 
 	test('isolates additional tools to one session and moves them with the session resource', () => {
@@ -516,6 +532,39 @@ suite('AgentHostClientTools', () => {
 			remote: await publishedTools(tools, REMOTE_COPILOT_CLI_SESSION_TYPE),
 			other: await publishedTools(tools, 'agent-host-claude'),
 		}, { local: expected, remote: expected, other: expected });
+	});
+
+	test('computes full reference names once per client tool update rather than once per tool', async () => {
+		const extensionTools = [1, 2, 3].map((index): IToolData => ({
+			id: `publisher.extension.tool${index}`,
+			toolReferenceName: `tool${index}`,
+			displayName: `Tool ${index}`,
+			modelDescription: `Runs extension tool ${index}`,
+			source: { type: 'extension', label: 'Extension', extensionId: new ExtensionIdentifier('Publisher.Extension') },
+		}));
+		const tools = observableValue<readonly IToolData[]>('tools', extensionTools.slice(0, 2));
+		const extensionToolSet = new class extends mock<IToolSet>() {
+			override readonly id = 'publisher.extension';
+			override readonly deprecated = false;
+			override getTools(): Iterable<IToolData> { return extensionTools; }
+		};
+		const client = createActiveClientService(tools, constObservable([extensionToolSet]), undefined, undefined, new Map(extensionTools.map(tool => [tool.id, `publisher.extension/${tool.toolReferenceName}`])));
+		const scope = disposables.add(client.service.acquireScope('agent-host-claude', []));
+		await scope.whenResolved();
+		const published: (string | undefined)[][] = [];
+		disposables.add(autorun(reader => {
+			published.push(scope.tools.read(reader).map(definition => readAgentToolFullReferenceName(definition)));
+		}));
+
+		tools.set(extensionTools, undefined);
+
+		assert.deepStrictEqual({ published, snapshots: client.getFullReferenceNameSnapshots() }, {
+			published: [
+				['publisher.extension/tool1', 'publisher.extension/tool2'],
+				['publisher.extension/tool1', 'publisher.extension/tool2', 'publisher.extension/tool3'],
+			],
+			snapshots: 2,
+		});
 	});
 
 	// ── toolDataToDefinition ─────────────────────────────────────────────
@@ -880,6 +929,7 @@ suite('AgentHostClientTools', () => {
 				createToolSet: () => { throw new Error('not impl'); },
 				getFullReferenceNames: () => [],
 				getFullReferenceName: () => '',
+				createFullReferenceNameResolver: () => () => '',
 				getFullReferenceNameMap: () => new Map(),
 				getToolByFullReferenceName: () => undefined,
 				getDeprecatedFullReferenceNames: () => new Map(),
@@ -1116,10 +1166,11 @@ suite('AgentHostClientTools', () => {
 				onDidChangeLanguageModels: Event.None,
 				deltaLanguageModelChatProviderDescriptors: () => { },
 				registerLanguageModelProvider: () => toDisposable(() => { }),
+				lookupLanguageModel: () => undefined,
 			});
 			instantiationService.stub(IConfigurationService, configService);
 			instantiationService.stub(IOutputService, { getChannel: () => undefined });
-			instantiationService.stub(IWorkspaceContextService, { getWorkspace: () => ({ id: '', folders: [] }), getWorkspaceFolder: () => null });
+			instantiationService.stub(IWorkspaceContextService, { getWorkspace: () => (testIWorkspace({ id: '', folders: [] })), getWorkspaceFolder: () => null });
 			instantiationService.stub(IChatEditingService, {
 				registerEditingSessionProvider: () => toDisposable(() => { }),
 			});
@@ -1538,13 +1589,13 @@ suite('AgentHostClientTools', () => {
 			}, backends[0]);
 			await connection.whenDispatched(({ action }) => action.type === ActionType.ChatToolCallComplete && action.toolCallId === 'removed-app');
 			assert.deepStrictEqual({
-				invocations: toolsService.invokedToolCalls.map(call => ({ id: call.toolId, context: call.context, scope: call.toolSessionResource?.toString() })),
+				invocations: toolsService.invokedToolCalls.map(call => ({ id: call.toolId, context: call.context, scope: call.toolSessionResource?.toString(), origin: call.originatingChatResource?.toString() })),
 				begun: toolsService.begunToolCallOptions.map(call => ({ scope: call.toolSessionResource?.toString(), presentation: call.sessionResource })),
 				removed: connection.dispatchedActions.flatMap(({ action }) => action.type === ActionType.ChatToolCallComplete && action.toolCallId === 'removed-app' ? [action.result.error?.code] : []),
 			}, {
 				invocations: [
-					{ id: firstTool.id, context: undefined, scope: resources[0].toString() },
-					{ id: secondTool.id, context: undefined, scope: resources[1].toString() },
+					{ id: firstTool.id, context: undefined, scope: resources[0].toString(), origin: resources[0].toString() },
+					{ id: secondTool.id, context: undefined, scope: resources[1].toString(), origin: resources[1].toString() },
 				],
 				begun: resources.map(resource => ({ scope: resource.toString(), presentation: undefined })),
 				removed: ['toolUnavailable'],
@@ -3212,6 +3263,7 @@ suite('AgentHostClientTools', () => {
 					callId: call.callId,
 					parameters: call.parameters,
 					hasContext: call.context !== undefined,
+					origin: call.originatingChatResource?.toString(),
 					preApprovedKind: call.preApproved?.type,
 				})),
 				completion: connection.dispatchedActions.find(entry =>
@@ -3222,6 +3274,7 @@ suite('AgentHostClientTools', () => {
 					callId: 'client-tool-1',
 					parameters: { task: 'build' },
 					hasContext: false,
+					origin: sessionResource.with({ fragment: 'subagent/task-call-1' }).toString(),
 					preApprovedKind: ToolConfirmKind.ConfirmationNotNeeded,
 				}],
 				completion: {
@@ -3904,6 +3957,7 @@ suite('AgentHostClientTools', () => {
 					chatResource: subagentChat,
 					isChatAvailable: true,
 					isActive: true,
+					isError: false,
 					startedAt: Date.parse('2025-01-01T00:00:00.000Z'),
 					duration: undefined,
 				},

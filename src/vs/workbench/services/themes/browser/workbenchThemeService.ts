@@ -47,6 +47,8 @@ import { generateColorThemeCSS } from './colorThemeCss.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { IHostService } from '../../host/browser/host.js';
 import { toAction } from '../../../../base/common/actions.js';
+import { ISizeService } from '../../../../platform/theme/common/sizeService.js';
+import './workbenchSizeService.js';
 
 // implementation
 
@@ -117,7 +119,8 @@ export class WorkbenchThemeService extends Disposable implements IWorkbenchTheme
 		@IUserDataInitializationService private readonly userDataInitializationService: IUserDataInitializationService,
 		@ILanguageService private readonly languageService: ILanguageService,
 		@INotificationService private readonly notificationService: INotificationService,
-		@IHostService private readonly hostService: IHostService
+		@IHostService private readonly hostService: IHostService,
+		@ISizeService private readonly sizeService: ISizeService,
 	) {
 		super();
 		this.container = layoutService.mainContainer;
@@ -167,6 +170,7 @@ export class WorkbenchThemeService extends Disposable implements IWorkbenchTheme
 		}
 		themeData.setCustomizations(this.settings);
 		this.applyTheme(themeData, undefined, true);
+		this._register(sizeService.onDidChangeSizes(() => this.updateDynamicCSSRules(this.currentColorTheme)));
 
 		const fileIconData = FileIconThemeData.fromStorageData(this.storageService);
 		if (fileIconData) {
@@ -597,7 +601,8 @@ export class WorkbenchThemeService extends Disposable implements IWorkbenchTheme
 			themeData,
 			'.monaco-workbench',
 			themingRegistry.getThemingParticipants(),
-			this.environmentService
+			this.environmentService,
+			this.sizeService,
 		);
 		_applyRules(css.code, colorThemeRulesClassName);
 	}
@@ -914,7 +919,7 @@ class ThemeFileWatcher {
 }
 
 function _applyRules(styleSheetContent: string, rulesClassName: string) {
-	// eslint-disable-next-line no-restricted-syntax
+	// eslint-disable-next-line eslint-js/no-restricted-syntax
 	const themeStyles = mainWindow.document.head.getElementsByClassName(rulesClassName);
 	if (themeStyles.length === 0) {
 		const elStyle = createStyleSheet();
