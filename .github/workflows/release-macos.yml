@@ -1,5 +1,12 @@
 # Build, sign, notarize and publish the macOS app — the release counterpart of
-# celiador-build.yml's macOS job. Manual only; one run = one published build.
+# celiador-build.yml's macOS job. One run = one published build. Three triggers
+# (CHANNELS.md):
+#   - manual (workflow_dispatch): any channel; the only way to release prod;
+#   - a train tag in Cliefden/celiador (repository_dispatch "celiador-release",
+#     sent by that repo's editor-test-build.yml on a vX.Y.Z tag): a test build
+#     from main, its icon stamped with the train tag;
+#   - nightly (schedule): a dev build from main, skipped when the dev feed
+#     already has this commit.
 #
 # Runs on the self-hosted Mac runner (scw-mac), where everything the release
 # needs already lives: the Developer ID Application identity in the login
@@ -26,6 +33,13 @@ on:
         type: choice
         options: [prod, test, dev]
         default: prod
+  repository_dispatch:
+    # client_payload: { "tag": "vX.Y.Z" } — the Cliefden/celiador train tag.
+    types: [celiador-release]
+  schedule:
+    # Nightly dev build (03:17 UTC; off the hour, when scheduled runs pile up).
+    # The self-hosted Mac has to be awake; a missed night is just skipped.
+    - cron: "17 3 * * *"
 
 concurrency:
   # Shared with release-linux.yml: both read, merge and rewrite the one published
@@ -37,8 +51,83 @@ permissions:
   contents: read
 
 jobs:
+  plan:
+    # Turns the trigger into channel / publish / notes / label, so the release
+    # job reads needs.plan.outputs.* instead of inputs.* (empty for
+    # repository_dispatch and schedule). Runs on a hosted runner: a nightly with
+    # nothing new is skipped here without waking the Mac.
+    name: Plan
+    runs-on: ubuntu-24.04
+    # Automatic triggers only in the real repo (never in a fork).
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'Cliefden/celiador-editor'
+    timeout-minutes: 5
+    outputs:
+      channel: ${{ steps.plan.outputs.channel }}
+      publish: ${{ steps.plan.outputs.publish }}
+      notes: ${{ steps.plan.outputs.notes }}
+      label: ${{ steps.plan.outputs.label }}
+      build: ${{ steps.plan.outputs.build }}
+    steps:
+      - name: Resolve channel, notes and label
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_PUBLISH: ${{ inputs.publish }}
+          IN_NOTES: ${{ inputs.notes }}
+          # From another repo's payload: validated, and only ever handled via env.
+          TAG: ${{ github.event.client_payload.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          short="${SHA:0:11}" label="" build=true
+          case "$EVENT" in
+            workflow_dispatch)
+              channel="${IN_CHANNEL:-prod}" publish="$IN_PUBLISH" notes="$IN_NOTES" ;;
+            repository_dispatch)
+              if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "::error::client_payload.tag must be vX.Y.Z"
+                exit 1
+              fi
+              channel=test publish=true label="$TAG"
+              notes="Test build for the Celiador $TAG train (editor $short)." ;;
+            schedule)
+              channel=dev publish=true
+              notes="Nightly dev build from main ($short)."
+              # Nothing to do when the dev feed already has this commit (a
+              # manifest entry's version is the build's commit). A failed
+              # lookup builds anyway.
+              if releases="$(curl -fsS --max-time 20 --retry 3 https://dev.celiador.ai/api/releases)"; then
+                have="$(RELEASES="$releases" node -e '
+                  const { releases = [] } = JSON.parse(process.env.RELEASES);
+                  console.log(releases.some(r => r.platform === "darwin-arm64" && r.quality === "insider" && r.version === process.argv[1]));
+                ' "$SHA")"
+                if [ "$have" = true ]; then
+                  build=false
+                  echo "::notice::The dev feed already has $short; nothing to build."
+                fi
+              else
+                echo "::warning::Couldn't read the dev release feed; building anyway."
+              fi ;;
+            *)
+              echo "::error::unexpected trigger $EVENT"
+              exit 1 ;;
+          esac
+          echo "$EVENT → channel $channel, publish $publish, label ${label:-<default>}, build $build"
+          {
+            echo "channel=$channel"
+            echo "publish=$publish"
+            echo "label=$label"
+            echo "build=$build"
+            echo "notes<<CELIADOR_NOTES_EOF"
+            echo "$notes"
+            echo "CELIADOR_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
   release:
     name: macOS (arm64)
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 240
     env:
@@ -123,7 +212,11 @@ jobs:
         # and stamps the icon (red + commit for dev, green + tag for test); prod
         # restores the committed files. The gulp output is then named after
         # nameLong ("Celiador Test.app"), so later steps find the bundle by glob.
-        run: build/celiador/channel.sh "${{ inputs.channel || 'prod' }}"
+        # A train-triggered test build is labelled with the train tag.
+        env:
+          CHANNEL: ${{ needs.plan.outputs.channel }}
+          LABEL: ${{ needs.plan.outputs.label }}
+        run: build/celiador/channel.sh "$CHANNEL" ${LABEL:+"$LABEL"}
 
       - name: Build app
         run: pnpm run gulp vscode-darwin-${{ env.VSCODE_ARCH }}-min
@@ -149,7 +242,8 @@ jobs:
 
       - name: Sign, notarize, package, publish
         env:
-          NOTES: ${{ inputs.notes }}
+          NOTES: ${{ needs.plan.outputs.notes }}
+          PUBLISH: ${{ needs.plan.outputs.publish }}
           # The runner's launchd session (SessionCreate) can't see the login
           # keychain, so the Developer ID identity lives in a dedicated keychain
           # on this Mac (docs/RELEASING.md); its password is the one secret.
@@ -174,7 +268,7 @@ jobs:
           export CELIADOR_SIGNING_KEYCHAIN="$KEYCHAIN"
           ARGS=(--out "$RUNNER_TEMP/celiador-release")
           [ -n "$NOTES" ] && ARGS+=(--notes "$NOTES")
-          [ "${{ inputs.publish }}" = "true" ] && ARGS+=(--publish)
+          [ "$PUBLISH" = "true" ] && ARGS+=(--publish)
           build/celiador/release-macos.sh "${ARGS[@]}"
 
       - name: Upload artifacts

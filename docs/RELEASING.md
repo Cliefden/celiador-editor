@@ -8,7 +8,7 @@ download from celiador.ai, open without a Gatekeeper prompt, and have auto-updat
 | Piece | Where | What it does |
 |---|---|---|
 | `build/celiador/release-macos.sh` | this repo | Copies the built app, signs it inner-out with the Developer ID Application identity (hardened runtime, the entitlements under `build/azure-pipelines/darwin/`), notarizes through `asc`, staples, writes the update `.zip` and the `.dmg`, merges a `manifest.json` entry, and with `--publish` rsyncs it all to the box. |
-| `.github/workflows/release-macos.yml` | this repo | The same, from a button: builds on the self-hosted Mac runner and runs the script. Manual only. |
+| `.github/workflows/release-macos.yml` | this repo | The same, from a button: builds on the self-hosted Mac runner and runs the script. Manual for any channel (prod is manual only); also a test build on every `Cliefden/celiador` train tag and a nightly dev build (see [Channels](#channels)). |
 | `GET /api/update/:platform/:quality/:commit` | daemon | The feed the built-in updater polls. `product.json` `updateUrl` is `https://celiador.ai`; `abstractUpdateService` appends the rest. 204 = up to date, otherwise the newest build's descriptor (Squirrel.Mac downloads its `url`). |
 | `GET /api/releases[/latest/darwin-arm64/stable[/dmg]]`, `GET /api/releases/<file>` | daemon | The listing and the artifacts; what the site's download button and `/releases` page use. |
 | `releases/manifest.json` | box, `~/daemon/releases` | `{ "releases": [ … ] }`, newest first. Appended, never pruned: only commits the manifest knows are ever offered an update, so a local dev build (unknown commit) is never "updated" to an older release. |
@@ -127,6 +127,34 @@ environment's update feed therefore only ever offers its own channel's builds.
 From Actions, pick the channel in *Release (macOS)* → *Run workflow*. Restore
 prod (`channel.sh prod`) before committing anything — the committed
 `product.json` is always prod.
+
+Test and dev also build on their own; both build this repo's `main`:
+
+| Channel | Trigger | Icon label | Skipped when |
+|---|---|---|---|
+| test | a `vX.Y.Z` tag pushed in `Cliefden/celiador` (`scripts/release.sh`): that repo's `editor-test-build.yml` sends a `repository_dispatch` (`celiador-release`, payload `{"tag":"vX.Y.Z"}`) here | the train tag | — |
+| dev | nightly, 03:17 UTC (`schedule`) | the short commit | the dev feed already lists this commit for `darwin-arm64`/`insider` |
+
+The first job (*Plan*, a hosted runner) turns the trigger into channel, notes
+and label, so a nightly with nothing new never wakes the Mac. Both need the
+self-hosted runner awake; a missed night is simply skipped. The dispatch needs
+one secret in `Cliefden/celiador`: `EDITOR_DISPATCH_TOKEN`, a fine-grained
+token for `Cliefden/celiador-editor` only with *Contents: read and write*
+(that is what `POST /repos/…/dispatches` requires):
+
+```sh
+gh secret set EDITOR_DISPATCH_TOKEN --repo Cliefden/celiador --body "<token>"
+```
+
+Without it the tag still deploys daemon + web + iOS; the editor step warns and
+the test build can be started by hand. To start one by hand exactly as a tag would:
+
+```sh
+gh api repos/Cliefden/celiador-editor/dispatches -f event_type=celiador-release -f 'client_payload[tag]=v0.2.3'
+```
+
+`celiador-build.yml` (unsigned multi-platform packages) no longer runs on tag
+pushes; it's manual only.
 
 ## Verifying on a clean Mac
 
