@@ -9,7 +9,9 @@ import * as os from 'os';
 import * as path from 'path';
 
 const nodeCompileCacheKinds = ['main', 'extension-host', 'shared-process', 'pty-host', 'agent-host'] as const;
-const nodeCompileCacheTagPattern = /^v\d+\.\d+\.\d+-(arm64|x64)-[0-9a-f]{8}$/;
+// Celiador edit: Node appends the generating user's uid on POSIX
+// (`v24.22.1-arm64-7034790f-501`), so accept an optional `-<uid>` suffix.
+const nodeCompileCacheTagPattern = /^v\d+\.\d+\.\d+-(arm64|x64)-[0-9a-f]{8}(?:-\d+)?$/;
 const nodeCompileCacheEntryPattern = /^[0-9a-f]{8}$/;
 
 export interface INodeCompileCacheProduct {
