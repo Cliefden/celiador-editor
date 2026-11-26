@@ -249,6 +249,8 @@ export interface paths {
         /**
          * Delete a session
          * @description An id the caller doesn't own deletes nothing and answers `{ ok: false }` with 200.
+         *     A cloud run still working on the session is cancelled before its
+         *     workspace is removed (in the background, after the answer).
          */
         delete: operations["deleteSession"];
         options?: never;
@@ -872,7 +874,7 @@ export interface paths {
         };
         /**
          * Account summary
-         * @description Identity, plan, today's agent usage against the limits, and the task summary.
+         * @description Identity, plan, today's agent usage against the limits, the caller's own month-to-date usage and last 14 days, and the task summary.
          */
         get: operations["getMe"];
         put?: never;
@@ -1582,6 +1584,7 @@ export interface components {
             prompt?: string;
             /** @description Required for `runner = server`. */
             repo?: {
+                /** @description `https://github.com/<owner>/<name>` (optionally `.git`); cloud runs check out github.com repositories only (400 otherwise). */
                 url: string;
                 /** @description Start from (or with `existingBranch`, work on) this branch. */
                 branch?: string;
@@ -2257,6 +2260,26 @@ export interface components {
             limits: components["schemas"]["UserLimits"];
             /** Format: date-time */
             resetsAt: string;
+            /** @description The caller's own usage this calendar month (UTC) so far, today included. The limits are daily; this is the running total to set them against. Absent from older daemons. */
+            period?: {
+                /**
+                 * Format: date
+                 * @description First day of the month (UTC), inclusive.
+                 */
+                from: string;
+                /**
+                 * Format: date
+                 * @description Today (UTC), inclusive.
+                 */
+                to: string;
+                usage: components["schemas"]["DayUsage"];
+            };
+            /** @description The caller's own usage for the last 14 UTC days, newest first, today included; days without a request are zeros. Absent from older daemons. */
+            history?: {
+                /** Format: date */
+                day: string;
+                usage: components["schemas"]["DayUsage"];
+            }[];
             tasks: {
                 running: number;
                 prOpen: number;
