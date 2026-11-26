@@ -345,6 +345,13 @@ export class ExtensionManagementService extends AbstractExtensionManagementServi
 			verificationStatus !== ExtensionSignatureVerificationCode.Success
 			&& !(verificationStatus === ExtensionSignatureVerificationCode.NotSigned && !shouldRequireSignature)
 			&& verifySignature
+			// --- Start Celiador ---
+			// Celiador doesn't ship Microsoft's closed-source verifier (`@vscode/vsce-sign` comes
+			// from the product distro), so verification cannot run and returns `undefined`. Install
+			// without verifying then, as VSCodium does; otherwise every Open VSX install fails with
+			// "Signature verification was not executed". A signature that fails to verify still blocks.
+			&& verificationStatus !== undefined
+			// --- End Celiador ---
 			&& this.environmentService.isBuilt
 			&& (await this.getTargetPlatform()) !== TargetPlatform.LINUX_ARMHF
 		) {

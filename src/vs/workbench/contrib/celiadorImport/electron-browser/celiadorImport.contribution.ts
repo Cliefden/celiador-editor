@@ -13,6 +13,7 @@
 
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { getErrorMessage } from '../../../../base/common/errors.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { parse } from '../../../../base/common/json.js';
 import { applyEdits, setProperty } from '../../../../base/common/jsonEdit.js';
@@ -50,6 +51,8 @@ interface IImportReport {
 	snippets: number;
 	extensionsInstalled: number;
 	extensionsUnavailable: string[];
+	/** On Open VSX, but the install failed (the reason is in the window log). */
+	extensionsFailed: string[];
 	extensionsBlocked: number;
 }
 
@@ -102,7 +105,7 @@ async function importFrom(services: IImportServices, source: IImportSource): Pro
 	const profile = services.userDataProfileService.currentProfile;
 
 	const userDir = sourceUserDir(source, environmentService.userHome, OS);
-	const report: IImportReport = { settings: 0, droppedSettings: 0, keybindings: 0, snippets: 0, extensionsInstalled: 0, extensionsUnavailable: [], extensionsBlocked: 0 };
+	const report: IImportReport = { settings: 0, droppedSettings: 0, keybindings: 0, snippets: 0, extensionsInstalled: 0, extensionsUnavailable: [], extensionsFailed: [], extensionsBlocked: 0 };
 
 	// Settings: edit Celiador's settings.json text so its comments survive.
 	const sourceSettings = parse(await readText(fileService, joinPath(userDir, 'settings.json')) ?? '{}');
@@ -167,8 +170,11 @@ async function importFrom(services: IImportServices, source: IImportSource): Pro
 		report.extensionsUnavailable = toInstall.filter(id => !foundIds.has(id));
 		const results = await extensionManagementService.installGalleryExtensions(found.map(extension => ({ extension, options: {} })));
 		report.extensionsInstalled = results.filter(r => !r.error).length;
-		for (const r of results.filter(r => r.error)) {
-			logService.warn(`[celiador-import] could not install ${r.identifier.id}: ${r.error}`);
+		for (const r of results) {
+			if (r.error) {
+				report.extensionsFailed.push(r.identifier.id);
+				logService.warn(`[celiador-import] could not install ${r.identifier.id}: ${getErrorMessage(r.error)}`);
+			}
 		}
 	}
 	return report;
@@ -180,6 +186,9 @@ function summarize(source: IImportSource, report: IImportReport): string {
 	];
 	if (report.extensionsUnavailable.length) {
 		parts.push(localize('celiadorImport.unavailable', "Not on Open VSX: {0}.", report.extensionsUnavailable.join(', ')));
+	}
+	if (report.extensionsFailed.length) {
+		parts.push(localize('celiadorImport.failedExtensions', "Could not install: {0} (see the window log).", report.extensionsFailed.join(', ')));
 	}
 	if (report.extensionsBlocked || report.droppedSettings) {
 		parts.push(localize('celiadorImport.skipped', "Skipped {0} AI or editor-specific extensions and {1} settings that Celiador replaces.", report.extensionsBlocked, report.droppedSettings));
