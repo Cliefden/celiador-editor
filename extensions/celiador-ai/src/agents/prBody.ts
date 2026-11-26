@@ -11,15 +11,11 @@
 // vscode import) so it unit-tests under plain node; the daemon composes the
 // same body server-side and PATCHes in what only it knows (the cost).
 
+import type { Usage } from '../contract';
 import { formatCost, formatDuration } from './model';
 
-/** A session's usage as the daemon reports it (`Task.usage`, contract §1). */
-export interface TaskUsage {
-  requests?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  costUsd?: number;
-}
+/** A session's usage as the daemon reports it (`Task.usage`), any part of it known. */
+export type TaskUsage = Partial<Usage>;
 
 /** The parts of the agent's "## Self-review" section. */
 export interface SelfReview {

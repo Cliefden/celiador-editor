@@ -53,5 +53,10 @@ jobs:
       - name: Install extension dependencies
         run: pnpm install --frozen-lockfile --filter celiador-ai --ignore-scripts
 
+      # The daemon's API types are vendored from Cliefden/celiador at the commit in
+      # src/contract/SOURCE; this fails on a hand edit and notes when main moved on.
+      - name: Check the vendored daemon contract
+        run: pnpm -C extensions/celiador-ai run check-contract
+
       - name: Compile and run unit tests
         run: pnpm -C extensions/celiador-ai run test:unit

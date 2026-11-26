@@ -33,3 +33,7 @@ The editor builds and bundles this extension (`pnpm run gulp compile-extensions`
 cd extensions/celiador-ai
 pnpm run test:unit
 ```
+
+## The daemon's API types
+
+The daemon's wire types (profile, chats, `/api/me`, tasks, session events, health, config) come from its OpenAPI spec in `Cliefden/celiador` (`packages/client`). `src/contract/schema.ts` is a vendored copy pinned to the celiador commit in `src/contract/SOURCE`. Never edit it by hand: `pnpm run sync-contract` re-vendors from celiador `main` (or `pnpm run sync-contract <ref>`), and CI's `pnpm run check-contract` fails on a hand edit. Use the aliases in `src/contract/index.ts`. They are types only, so nothing reaches the built extension. The daemon's API only changes additively, so an older pin keeps working; re-vendor when you need a new field.
