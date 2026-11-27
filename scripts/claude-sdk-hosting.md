@@ -15,8 +15,8 @@ all of this — the provider registers and the SDK loads from `node_modules`, or
 ```json
 "agentSdks": {
   "claude": {
-    "version": "0.3.258",
-    "urlTemplate": "https://celiador.ai/sdk/claude/0.3.258/{sdkTarget}.tgz"
+    "version": "0.3.304",
+    "urlTemplate": "https://celiador.ai/sdk/claude/0.3.304/{sdkTarget}.tgz"
   }
 }
 ```
@@ -28,22 +28,36 @@ The downloader substitutes `{sdkTarget}` (one of `darwin-arm64`, `darwin-x64`,
 
 ## 1. Build the tarballs
 
+Preferred: upstream's packager, which installs from the pinned lockfile in
+`build/agent-sdk/agents/claude/`, omits the SDK's peer dependencies and checks the
+result loads (see `build/agent-sdk/README.md`):
+
 ```sh
-scripts/build-claude-sdk-tarballs.sh            # version read from node_modules
-# or: scripts/build-claude-sdk-tarballs.sh 0.3.258
+node build/agent-sdk/package.ts --sdk=claude --target=darwin-arm64 --out=.build/claude-sdk
+node build/agent-sdk/package.ts --sdk=claude --target=darwin-x64 --out=.build/claude-sdk
 ```
 
-Output: `.build/claude-sdk/0.3.258/<sdkTarget>.tgz` — the path mirrors the URL, so
+It writes `claude-<version>-<sdkTarget>.tgz`; host it as `<version>/<sdkTarget>.tgz`.
+
+The older script still works, but it resolves the SDK from the registry rather than
+the lockfile:
+
+```sh
+scripts/build-claude-sdk-tarballs.sh            # version read from node_modules
+# or: scripts/build-claude-sdk-tarballs.sh 0.3.304
+```
+
+Output: `.build/claude-sdk/0.3.304/<sdkTarget>.tgz` — the path mirrors the URL, so
 hosting is a plain sync. Each tarball contains the main SDK **and** the matching
 native package (`@anthropic-ai/claude-agent-sdk-<sdkTarget>`), selected via npm
 `--os/--cpu/--libc`, so one host (e.g. a mac) builds every platform's artifact.
 
 ## 2. Host them (pick one)
 
-So that `https://celiador.ai/sdk/claude/0.3.258/<sdkTarget>.tgz` resolves:
+So that `https://celiador.ai/sdk/claude/0.3.304/<sdkTarget>.tgz` resolves:
 
 - **Caddy static dir (simplest on the box).** Put the files under e.g.
-  `/var/www/celiador/sdk/claude/0.3.258/` and add to the Caddyfile:
+  `/var/www/celiador/sdk/claude/0.3.304/` and add to the Caddyfile:
 
   ```
   handle_path /sdk/* {
@@ -52,7 +66,7 @@ So that `https://celiador.ai/sdk/claude/0.3.258/<sdkTarget>.tgz` resolves:
   }
   ```
 
-- **celiador-web (`public/`).** Drop `public/sdk/claude/0.3.258/*.tgz` into the
+- **celiador-web (`public/`).** Drop `public/sdk/claude/0.3.304/*.tgz` into the
   Next.js app; they're served at `/sdk/...` on the same origin.
 
 - **A CDN / object store.** Upload and point `urlTemplate` at that origin instead.
@@ -65,11 +79,19 @@ for the macOS build).
 
 ## 3. Bumping the SDK version
 
-1. Update `@anthropic-ai/claude-agent-sdk` in the editor `package.json` + reinstall.
+1. Bump the SDK pin as `build/agent-sdk/README.md` § "Bumping an SDK version" describes
+   (the `agents/claude` pin + lockfile and the root `package.json` devDependency move
+   together; an upstream sync usually does this for you).
 2. Update BOTH the `version` and the `{version}` in `urlTemplate` in `product.json`
    (only `{sdkTarget}` is substituted; the version is literal in the path).
-3. Re-run the build script and host the new `<version>/` directory. Old versions can
-   stay hosted so already-cached clients and rollbacks keep working.
+3. Build the tarballs and host the new `<version>/` directory **before** a release
+   ships the new `product.json` — a released app pointing at a missing version can't
+   start the Claude agent. Old versions stay hosted so already-cached clients and
+   rollbacks keep working.
+
+Because the bump in step 1 arrives with upstream syncs while `product.json` does not,
+the two drift apart (the 2026-11 syncs moved the pin to 0.3.304 while `product.json`
+still downloaded 0.3.258). Check `product.json` after every sync.
 
 ## Verifying
 
