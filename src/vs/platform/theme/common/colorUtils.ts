@@ -54,6 +54,7 @@ export const enum ColorTransformType {
 	IfDefinedThenElse,
 	Mix,
 	Opacity,
+	ThemeColor,
 }
 
 export type ColorTransform =
@@ -65,7 +66,8 @@ export type ColorTransform =
 	| { op: ColorTransformType.OneOf; values: readonly ColorValue[] }
 	| { op: ColorTransformType.LessProminent; value: ColorValue; background: ColorValue; factor: number; transparency: number }
 	| { op: ColorTransformType.IfDefinedThenElse; if: ColorIdentifier; then: ColorValue; else: ColorValue }
-	| { op: ColorTransformType.Mix; color: ColorValue; with: ColorValue; ratio?: number };
+	| { op: ColorTransformType.Mix; color: ColorValue; with: ColorValue; ratio?: number }
+	| { op: ColorTransformType.ThemeColor; color: ColorIdentifier };
 
 export interface ColorDefaults {
 	light: ColorValue | null;
@@ -149,12 +151,14 @@ class ColorRegistry extends Disposable implements IColorRegistry {
 	readonly onDidChangeSchema: Event<void> = this._onDidChangeSchema.event;
 
 	private colorsById: { [key: string]: ColorContribution };
+	private readonly defaultColorSchema: IJSONSchema;
 	private colorSchema: IJSONSchemaForColors = { type: 'object', properties: {} };
 	private colorReferenceSchema: IJSONSchema & { enum: string[]; enumDescriptions: string[] } = { type: 'string', enum: [], enumDescriptions: [] };
 
 	constructor() {
 		super();
 		this.colorsById = {};
+		this.defaultColorSchema = { type: 'string', const: DEFAULT_COLOR_CONFIG_VALUE, description: nls.localize('useDefault', 'Use the default color.') };
 	}
 
 	public notifyThemeUpdate(colorThemeData: IColorTheme) {
@@ -182,7 +186,7 @@ class ColorRegistry extends Disposable implements IColorRegistry {
 			description,
 			oneOf: [
 				propertySchema,
-				{ type: 'string', const: DEFAULT_COLOR_CONFIG_VALUE, description: nls.localize('useDefault', 'Use the default color.') }
+				this.defaultColorSchema
 			]
 		};
 		this.colorReferenceSchema.enum.push(id);
@@ -303,6 +307,9 @@ export function executeTransform(transform: ColorTransform, theme: IColorTheme):
 		case ColorTransformType.IfDefinedThenElse:
 			return resolveColorValue(theme.defines(transform.if) ? transform.then : transform.else, theme);
 
+		case ColorTransformType.ThemeColor:
+			return theme.getColor(transform.color, true, true);
+
 		case ColorTransformType.LessProminent: {
 			const from = resolveColorValue(transform.value, theme);
 			if (!from) {
@@ -346,6 +353,11 @@ export function opaque(colorValue: ColorValue, background: ColorValue): ColorTra
 
 export function oneOf(...colorValues: ColorValue[]): ColorTransform {
 	return { op: ColorTransformType.OneOf, values: colorValues };
+}
+
+/** Resolves a theme color without user or transient overrides of that color. */
+export function themeColor(color: ColorIdentifier): ColorTransform {
+	return { op: ColorTransformType.ThemeColor, color };
 }
 
 export function ifDefinedThenElse(ifArg: ColorIdentifier, thenArg: ColorValue, elseArg: ColorValue): ColorTransform {

@@ -138,7 +138,7 @@ suite('CeliadorRelayBridge', () => {
 		const configuration = new TestConfigurationService();
 		const notFound = (resource: URI) => createFileSystemProviderError(`not found: ${resource.path}`, FileSystemProviderErrorCode.FileNotFound);
 		instantiationService.stub(IWorkspaceContextService, new class extends mock<IWorkspaceContextService>() {
-			override getWorkspace(): IWorkspace { return { id: 'ws', folders: [{ uri: URI.file('/ws'), name: 'ws', index: 0, toResource: (path: string) => URI.file(`/ws/${path}`) }] }; }
+			override getWorkspace(): IWorkspace { return { id: 'ws', uri: URI.file('/ws'), folders: [{ uri: URI.file('/ws'), name: 'ws', index: 0, toResource: (path: string) => URI.file(`/ws/${path}`) }] }; }
 		}());
 		instantiationService.stub(IWorkspaceTrustManagementService, new class extends mock<IWorkspaceTrustManagementService>() {
 			override isWorkspaceTrusted() { return trusted; }

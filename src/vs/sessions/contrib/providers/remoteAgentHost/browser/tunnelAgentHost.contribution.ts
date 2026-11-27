@@ -19,12 +19,12 @@ import { ITelemetryService } from '../../../../../platform/telemetry/common/tele
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../workbench/common/contributions.js';
 import { AuthenticationSessionsChangeEvent, IAuthenticationService } from '../../../../../workbench/services/authentication/common/authentication.js';
 import { IHostService } from '../../../../../workbench/services/host/browser/host.js';
-import { logTunnelConnectAttempt, logTunnelConnectResolved, logTunnelDiscoveryResult, TunnelDiscoveryTrigger } from '../../../../common/sessionsTelemetry.js';
-import { ISessionsProvidersService } from '../../../../services/sessions/browser/sessionsProvidersService.js';
-import { IAgentHostFilterService } from '../../../../services/agentHostFilter/common/agentHostFilter.js';
-import { IConnectionDiagnosticsService } from './connectionDiagnostics.js';
-import { IRemoteAgentHostSessionsProviderConfig, RemoteAgentHostSessionsProvider } from './remoteAgentHostSessionsProvider.js';
-import { watchForIncompatibleNotifications } from './remoteHostOptions.js';
+import { logTunnelConnectAttempt, logTunnelConnectResolved, logTunnelDiscoveryResult, TunnelDiscoveryTrigger } from '../../../../../workbench/contrib/sessions/common/sessionsTelemetry.js';
+import { ISessionsProvidersService } from '../../../../../workbench/contrib/sessions/browser/sessionsProvidersService.js';
+import { IAgentHostFilterService } from '../../../../../workbench/contrib/sessions/common/agentHostFilter.js';
+import { IConnectionDiagnosticsService } from '../../../../../workbench/contrib/sessions/providers/remoteAgentHost/browser/connectionDiagnostics.js';
+import { IRemoteAgentHostSessionsProviderConfig, RemoteAgentHostSessionsProvider } from '../../../../../workbench/contrib/sessions/providers/remoteAgentHost/browser/remoteAgentHostSessionsProvider.js';
+import { watchForIncompatibleNotifications } from '../../../../../workbench/contrib/sessions/providers/remoteAgentHost/browser/remoteHostOptions.js';
 
 /** Minimum interval between silent status checks (5 minutes). */
 const STATUS_CHECK_INTERVAL = 5 * 60 * 1000;
@@ -41,6 +41,10 @@ export class TunnelAgentHostContribution extends Disposable implements IWorkbenc
 	private readonly _providerInstances = new Map<string, RemoteAgentHostSessionsProvider>();
 	private readonly _pendingConnects = new Map<string, Promise<void>>();
 	private _lastStatusCheck = 0;
+	/** Sequence number of the latest started discovery. */
+	private _lastStartedDiscovery = 0;
+	/** Sequence number of the newest discovery whose result was applied. */
+	private _lastAppliedDiscovery = 0;
 	private readonly _hostedTunnelSuppressions = new Set<string>();
 	private _remoteTunnelStatus: TunnelStatus = { type: 'uninitialized' };
 	private _hasReceivedRemoteTunnelStatus = false;
@@ -137,7 +141,7 @@ export class TunnelAgentHostContribution extends Disposable implements IWorkbenc
 		// through the filter service's `rediscover` so the host pill
 		// pulses while the initial automatic discovery is in flight,
 		// then switches to a static label once we know what hosts exist.
-		agentHostFilterService.rediscover();
+		agentHostFilterService.rediscover('automatic');
 	}
 
 	/**
@@ -171,6 +175,9 @@ export class TunnelAgentHostContribution extends Disposable implements IWorkbenc
 			const address = `${TUNNEL_ADDRESS_PREFIX}${tunnel.tunnelId}`;
 			if (!this._providerStores.has(address)) {
 				this._createProvider(address, tunnel.name);
+			} else {
+				// Discovery can rename a cached tunnel; workspace labels come from the provider label.
+				this._providerInstances.get(address)?.setLabel(tunnel.name);
 			}
 		}
 	}
@@ -464,6 +471,7 @@ export class TunnelAgentHostContribution extends Disposable implements IWorkbenc
 
 		this._lastStatusCheck = Date.now();
 		const cachedBefore = this._tunnelService.getCachedTunnels().length;
+		const discoveryId = ++this._lastStartedDiscovery;
 
 		// Fetch tunnel list silently to check online status
 		let onlineTunnels: ITunnelInfo[] | undefined;
@@ -487,7 +495,10 @@ export class TunnelAgentHostContribution extends Disposable implements IWorkbenc
 		}
 
 		const cached = this._tunnelService.getCachedTunnels();
-		if (onlineTunnels) {
+		// Discoveries can overlap (focus, sharing status, rediscovery, sign-in). A
+		// slower, older result must not undo a newer one's names, removals, or statuses.
+		if (onlineTunnels && discoveryId > this._lastAppliedDiscovery) {
+			this._lastAppliedDiscovery = discoveryId;
 			const onlineIds = new Set(onlineTunnels.map(t => t.tunnelId));
 			// Remove cached tunnels that no longer exist on the account
 			for (const tunnel of cached) {
@@ -502,9 +513,14 @@ export class TunnelAgentHostContribution extends Disposable implements IWorkbenc
 			// offline — those render grayed-out via the status-update loop
 			// below. Pass 'github' as authProvider so _handleSessionsChange
 			// can match these tunnels for teardown on session removal.
+			// Refresh already-cached tunnels in place so a renamed tunnel
+			// picks up its new name without losing its auth provider, order,
+			// or auto-connect suppression.
 			const cachedIds = new Set(cached.map(t => t.tunnelId));
 			for (const tunnel of onlineTunnels) {
-				if (!cachedIds.has(tunnel.tunnelId) && !this._tunnelService.isTunnelDismissed(tunnel.tunnelId)) {
+				if (cachedIds.has(tunnel.tunnelId)) {
+					this._tunnelService.updateCachedTunnel(tunnel);
+				} else if (!this._tunnelService.isTunnelDismissed(tunnel.tunnelId)) {
 					this._tunnelService.cacheTunnel(tunnel, 'github');
 				}
 			}
@@ -521,14 +537,16 @@ export class TunnelAgentHostContribution extends Disposable implements IWorkbenc
 
 				const tunnelId = address.slice(TUNNEL_ADDRESS_PREFIX.length);
 				const info = onlineTunnelMap.get(tunnelId);
-				if (info && info.hostConnectionCount > 0) {
+				if (info && info.hostConnectionCount !== undefined && info.hostConnectionCount > 0) {
 					provider.setConnectionStatus(RemoteAgentHostConnectionStatus.connected);
 
 				} else {
 					provider.setConnectionStatus(RemoteAgentHostConnectionStatus.disconnected);
 					// Host is not online — drop any cached sessions we were
 					// showing for it so the UI doesn't list stale entries.
-					provider.unpublishCachedSessions();
+					if (!info || info.hostConnectionCount === 0) {
+						provider.unpublishCachedSessions();
+					}
 				}
 			}
 
@@ -538,7 +556,7 @@ export class TunnelAgentHostContribution extends Disposable implements IWorkbenc
 		this._updateConnectionStatuses();
 
 		const totalFound = onlineTunnels?.length ?? 0;
-		const withActiveHost = onlineTunnels?.filter(t => t.hostConnectionCount > 0).length ?? 0;
+		const withActiveHost = onlineTunnels?.filter(t => t.hostConnectionCount !== undefined && t.hostConnectionCount > 0).length ?? 0;
 		this._logService.info(
 			`[TunnelAgentHost] Silent status check (${resolvedTrigger}): totalFound=${totalFound}, withActiveHost=${withActiveHost}, cachedBefore=${cachedBefore}, autoConnect=${autoConnectEnabled}`
 		);

@@ -143,6 +143,9 @@ import './contrib/celiadorImport/electron-browser/celiadorImport.contribution.js
 // Issues
 import './contrib/issue/electron-browser/issue.contribution.js';
 
+// Screenshot Tool
+import './contrib/screenshotTool/electron-browser/screenshotTool.contribution.js';
+
 // Surveys
 import './contrib/surveys/browser/survey.contribution.js';
 
@@ -151,6 +154,9 @@ import './contrib/processExplorer/electron-browser/processExplorer.contribution.
 
 // Remote
 import './contrib/remote/electron-browser/remote.contribution.js';
+
+// Workspaces
+import './contrib/workspaces/electron-browser/workspaces.contribution.js';
 
 // Terminal
 import './contrib/terminal/electron-browser/terminal.contribution.js';
@@ -198,9 +204,6 @@ import './contrib/remoteTunnel/electron-browser/remoteTunnel.contribution.js';
 // Chat
 import './contrib/chat/electron-browser/chat.contribution.js';
 import './contrib/chat/electron-browser/tunnelHost.contribution.js';
-
-// Copilot Voice
-import './contrib/agentsVoice/electron-browser/agentsVoiceNativeCommands.js';
 
 // Encryption
 import './contrib/encryption/electron-browser/encryption.contribution.js';

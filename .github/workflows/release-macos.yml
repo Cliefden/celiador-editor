@@ -176,15 +176,13 @@ jobs:
       - name: Setup pnpm
         uses: ./.github/actions/setup-pnpm
 
-      - name: Restore node_modules cache
-        id: cache-node-modules
-        uses: ./.github/actions/restore-node-modules
+      - name: Restore pnpm store cache
+        id: cache-pnpm-store
+        uses: ./.github/actions/restore-pnpm-store
         with:
-          key-prefix: celiador-node_modules-macos
-          key-args: "darwin ${{ env.VSCODE_ARCH }} $(node -p process.arch)"
+          key-prefix: celiador-pnpm-store-macos
 
       - name: Install dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: |
           set -e
           # node-gyp needs setuptools on Python 3.12+; Xcode's older pip has no --break-system-packages.
@@ -200,9 +198,9 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
           GYP_DEFINES: "kerberos_use_rtld=false"
 
-      - name: Save node_modules cache
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        uses: ./.github/actions/save-node-modules
+      - name: Save pnpm store cache
+        if: steps.cache-pnpm-store.outputs.cache-hit != 'true'
+        uses: ./.github/actions/save-pnpm-store
 
       - name: Download built-in extensions
         run: node build/lib/builtInExtensions.ts

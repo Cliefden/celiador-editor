@@ -10,3 +10,5 @@ ThirdPartyNotices.txt eol=crlf
 *.rtf -text
 *.vsix binary
 **/*.json linguist-language=jsonc
+
+.github/workflows/*.lock.yml linguist-generated=true

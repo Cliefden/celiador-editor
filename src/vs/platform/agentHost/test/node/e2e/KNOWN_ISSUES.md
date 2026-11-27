@@ -16,6 +16,17 @@ When a valid E2E scenario exposes a gap:
 
 Capability skips are tracked separately from suspected bugs. A provider that does not advertise a capability is expected to skip positive-path tests for that capability.
 
+### Copilot native Entra accounts are unavailable on Linux
+
+The native runtime currently enables Microsoft Entra account login only on Windows and macOS. A host-supplied token source does not bypass that platform gate. Linux cannot complete the positive setup-session or current-account conversation scenarios; this is not evidence that the account has no usable services.
+
+- Test: `authenticates and configures a new conversation and resumes its live SDK binding without global login` in `../providerIntegration/copilotAccountContext.integrationTest.ts`.
+- Scope: Linux with the bundled SDK `1.0.29-preview.10` / runtime `1.0.106-11`.
+- Expected on supported platforms: discover through resource authentication, resolve conversation policy with the runtime's normal managed-settings call, create a fully configured conversation and sign it in on that same session through the current Entra authority, read its session-owned catalog, and resume the live SDK binding once without login or switching. A conversation closed before its first message has no history, so its resume is rejected and a replacement is created and signed in under the same ID. Microsoft catalog policy is temporarily omitted independently of conversation policy. This fixture does not send a turn or establish cold-history persistence. Global queries must not accept a session-owned selection handle.
+- Observed: Linux CI rejected discovery before readiness in all three attempts. The runtime's Entra `SUPPORTED` predicate enables only Windows/macOS, and its host-owned Entra SDK suite also excludes Linux.
+- Gate: skip only this native positive-path case on Linux, matching the existing Entra transport test's platform scope. Keep protocol, credential and client tests enabled. Remove this gate when native Entra support includes Linux; do not weaken the account-confirmation assertions.
+- Reproduce on a supported platform: `./scripts/test-integration.sh --run src/vs/platform/agentHost/test/node/providerIntegration/copilotAccountContext.integrationTest.ts`. Re-enable the test before checking future Linux support. Cross-platform CI must distinguish this unsupported capability from a successful Entra journey.
+
 ### Copilot empty-mode native plugin agent selection
 
 A user selects an agent supplied by a plugin for a chat backed by the SDK's `empty` client mode. This mode is used by storage-scoped Copilot clients. The native plugin agent is absent from the session catalog even when its directory is supplied and configuration discovery is enabled, so the requested agent cannot be selected. Retrying as the default agent would silently change the user's request.
@@ -79,6 +90,17 @@ An administrator can disable identity capture while the runtime inherits an expl
   ./scripts/test-integration.sh --run src/vs/platform/agentHost/test/node/e2e/providers/copilotOtelAgentHostE2E.integrationTest.ts \
     --grep "managed identity denial"
   ```
+
+### Copilot canvas consent retry cannot ask again after Not Now
+
+A user opens a canvas whose extension asks to read a sensitive environment variable, picks Not Now, then selects Try Again in the warning. Try Again replaces the chat's runtime so that the extension asks again. Since runtime 1.0.115, the runtime records the decline in the session and restores it on every resume, so the replacement runtime declines the extension without asking. The user cannot allow the extension again in that session, including after restarting VS Code; a new session asks again.
+
+- Tests: `asks before a canvas opened from the UI reads a sensitive variable, reports a decline the runtime keeps across a retry, and keeps the approval across the refresh` (default and peer chat) in `../providerIntegration/copilotExtensionEnvConsent.integrationTest.ts`, and `asks for sensitive environment consent without a tool call, keeps a denial across a resume, and forgets session approvals on resume` in `../copilotSdkCanvas.integrationTest.ts`.
+- Scope: bundled SDK `2.0.2` / runtime `1.0.115`. Runtime `1.0.114` forgot the decline on resume, so Try Again asked again.
+- Expected: after a retry, the replacement runtime asks again and Allow opens the canvas.
+- Observed: the replacement runtime does not call the permission handler for the declined extension, and `canvas.open` fails with `extension did not become ready`. No host API clears the restored decline: `permissions.resetSessionApprovals` and `permissions.modifyRules` succeed but leave it in place.
+- Gate: the tests assert the current behavior. The Agent Host reports such a retry as a decline kept for the session, which tells the user that a new session asks again and offers no Try Again. When the runtime lets a retry ask again, restore the original assertions and remove that reporting.
+- Reproduce: `./scripts/test-integration.sh --run src/vs/platform/agentHost/test/node/providerIntegration/copilotExtensionEnvConsent.integrationTest.ts --run src/vs/platform/agentHost/test/node/copilotSdkCanvas.integrationTest.ts`.
 
 ### Historical binary Git changeset content loses non-UTF-8 bytes
 
@@ -479,38 +501,6 @@ Users can save independent Mode and Approvals choices on an Automation and expec
   AGENT_HOST_REPLAY_RECORD=1 ./scripts/test-integration.sh --run \
     src/vs/platform/agentHost/test/node/e2e/providers/codexAgentHostE2E.integrationTest.ts \
     --grep "an automation run restores Mode and Approvals after host restart"
-  ```
-
-### Claude paused-turn cancellation is not replay-stable
-
-- Tests:
-  - `cancelling a turn paused for input allows a replacement turn`
-  - `cancelling a turn paused for file-tool approval allows a replacement turn`
-- Scope: Claude replay.
-- Expected: cancelling while the turn waits for input or tool approval ends that turn and allows a fresh replacement turn to complete.
-- Observed: replay either continues the cancelled input turn's response or reports a chat error before the replacement can complete.
-- Gate: `supportsPausedTurnCancellationE2E` is enabled for Copilot and for Codex input requests. Codex has no native file-approval variant.
-- Reproduce:
-
-  ```bash
-  ./scripts/test-integration.sh --run \
-    src/vs/platform/agentHost/test/node/e2e/providers/claudeAgentHostE2E.integrationTest.ts \
-    --grep "cancelling a turn paused"
-  ```
-
-### Claude truncation does not produce a replay-stable follow-up request
-
-- Test: `truncating a materialized chat removes later context and allows continuation`.
-- Scope: Claude.
-- Expected: after `chat/truncated` removes the second turn, the follow-up model request contains the first turn and follow-up only.
-- Observed: live recording sends the expected pruned request, while replay rebuilds the follow-up request with the removed second turn still present.
-- Gate: `supportsTruncateE2E` is enabled only for Copilot.
-- Reproduce:
-
-  ```bash
-  AGENT_HOST_REPLAY_RECORD=1 ./scripts/test-integration.sh --run \
-    src/vs/platform/agentHost/test/node/e2e/providers/claudeAgentHostE2E.integrationTest.ts \
-    --grep "truncating a materialized chat"
   ```
 
 ## Structural coverage gaps
