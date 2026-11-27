@@ -116,6 +116,57 @@ build/celiador/release-macos.sh --check-installed   # exit 0: installed app is t
 
 It also fails when the installed bundle is not writable by you (for example root-owned after a `sudo` copy): the built-in updater cannot replace such a bundle, so later releases would silently never arrive.
 
+## Rolling back a release
+
+How the feed decides (daemon `src/releases/`): for each platform and quality it offers the entry with the newest `timestamp` (the build date in the app's `product.json`) to every installed app whose commit the manifest lists and is not that newest one. An app whose commit the manifest does not list is told it is up to date (204), and the updater never downgrades by itself. So a bad release is undone by changing which entry is newest. The daemon itself needs nothing: an editor release only changes the app.
+
+### 1. Demote the bad build (minutes)
+
+On the box, give the bad entry an older timestamp than the last good one, in the channel's manifest (`~/daemon/releases` for prod, `~/envs/<test|dev>/daemon/releases` otherwise):
+
+```sh
+ssh cliefden.com
+cd ~/daemon/releases
+cp manifest.json "manifest.json.bak-$(date +%Y%m%d-%H%M)"
+BAD=<bad commit> GOOD=<last good commit> node -e '
+  const fs = require("fs");
+  const m = JSON.parse(fs.readFileSync("manifest.json", "utf8"));
+  const pick = c => m.releases.find(r => r.platform === "darwin-arm64" && r.version.startsWith(c));
+  const bad = pick(process.env.BAD), good = pick(process.env.GOOD);
+  if (!bad || !good) { throw new Error("commit not in the manifest"); }
+  bad.timestamp = good.timestamp - 1000;
+  m.releases.sort((a, b) => b.timestamp - a.timestamp);
+  fs.writeFileSync("manifest.json.new", JSON.stringify(m, null, 2) + "\n");
+'
+mv manifest.json.new manifest.json   # atomic: the daemon re-reads on change, and an unreadable manifest empties the feed
+```
+
+Then the last good build is the newest again: apps that have not updated are no longer offered the bad one, the download button serves the good DMG, and apps already on the bad build are offered the good one. Check:
+
+```sh
+curl -s https://celiador.ai/api/releases/latest/darwin-arm64/stable | jq .version   # the good commit
+curl -sI https://celiador.ai/api/update/darwin-arm64/stable/<bad commit>           # 200: offered the good build
+curl -sI https://celiador.ai/api/update/darwin-arm64/stable/<good commit>          # 204
+```
+
+Undo by moving the backup back. Later releases keep the edit: the release script merges into the published manifest.
+
+Demote, don't delete. A deleted entry makes the bad build's commit unknown, so apps already on it are told they are up to date, and they never get any later release either; only reinstalling from the DMG reaches them.
+
+Going back is a downgrade: those apps move to the older VS Code base, and the updater installs a lower build number. Neither has been tried yet; rehearse it on the dev channel before you need it.
+
+### 2. Ship the fix
+
+Usually, fix it on `main` and cut a new prod release; everyone updates normally.
+
+When there is no quick fix, release the last good code as a new build: branch from the last good commit, add one empty commit (`git commit --allow-empty -m "Release <last good> again"`), push, and run *Release (macOS)* from that branch with channel prod. It is newer than everything in the manifest, so it reaches everyone, including apps stranded on a deleted entry's commit, which can still install the DMG by hand. The empty commit matters: rebuilding a commit the manifest already lists replaces its entry and overwrites its files under the same names, which the daemon serves as immutable and caches keep.
+
+Don't revert an upstream sync merge on `main` to roll back: a revert of a merge that size makes the next sync painful. Fix forward, or release from a branch as above.
+
+### Linux
+
+`release-linux.sh` writes into the same manifest. Treat `linux-x64` entries the same way (change the `platform` in the script above).
+
 ## Channels
 
 The same pipeline cuts the test and dev channels (`CHANNELS.md`): run
