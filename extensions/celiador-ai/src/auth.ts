@@ -7,6 +7,7 @@ import { generatePkce } from './pkce';
 import { getRestrictedSetting } from './config';
 import { resolveDaemonUrl, resolveUrlProtocol } from './productConfig';
 import { isDeadRefreshToken, parseStoredSession, planRefresh, sameSession, type Session } from './sessionSync';
+import type * as contract from './contract';
 
 // Dependency-free Supabase/GoTrue client for the editor. Supports PKCE-protected
 // OAuth and magic-link flows. Session stored in VS Code SecretStorage, access token
@@ -43,12 +44,11 @@ interface PkceState {
   expiresAt: number;
 }
 
-/** Which sign-in routes the server offers (`/api/config` → `signIn`); a missing flag means offered. */
-export interface SignInMethods {
-  password?: boolean;
-  magicLink?: boolean;
-  github?: boolean;
-}
+/**
+ * Which sign-in routes the server offers (`/api/config` → `signIn`). Partial on
+ * purpose: this client treats a missing flag as offered.
+ */
+export type SignInMethods = Partial<contract.SignInMethods>;
 
 /** A GoTrue error answer, with its HTTP status. */
 class GoTrueError extends Error {
@@ -124,10 +124,11 @@ export class Auth implements vscode.Disposable {
     const override = getRestrictedSetting<string>('supabaseUrl', '');
     const key = `${daemon}\n${override}`;
     if (this.supaConfig && this.supaConfigKey === key) {return this.supaConfig;}
-    let cfg: any;
+    // Parsed loosely: any of it may be missing (an older daemon, or not a daemon at all).
+    let cfg: Partial<contract.Config> | undefined;
     try {
       const res = await fetch(`${daemon}/api/config`, { headers: { Accept: 'application/json' } });
-      if (res.ok) {cfg = await res.json();}
+      if (res.ok) {cfg = (await res.json()) as Partial<contract.Config>;}
     } catch {
       /* fall back to daemon URL, uncached */
     }

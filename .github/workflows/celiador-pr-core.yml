@@ -6,9 +6,12 @@ name: Celiador PR (core)
 # Path-filtered so docs-only or extension-only PRs don't pay for a root install.
 # node_modules is cached under its own key (no glibc sysroot, unlike the Linux
 # release build); the cache is saved from main so pull requests can restore it.
+# A draft PR runs nothing (`wb pr` opens drafts); `gh pr ready` starts it.
 
 on:
   pull_request:
+    # ready_for_review: a draft marked ready runs its checks.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'src/**'
       - 'build/**'
@@ -45,6 +48,7 @@ env:
 jobs:
   core:
     name: Core lint, typecheck and unit tests
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:

@@ -8,48 +8,18 @@
 // numstat / unified diff output and the relay session's event log. No vscode
 // import, so they unit-test under plain node.
 
-export type TaskState = 'queued' | 'dispatched' | 'running' | 'pr-open' | 'merged' | 'failed' | 'cancelled';
+import type * as contract from '../contract';
 
-/** A task as `GET /api/tasks` returns it. Fields past `updatedAt` are optional (newer daemons). */
-export interface Task {
-  id: string;
-  repo: { owner: string; name: string; url: string };
-  issue?: { number: number; title: string; url: string };
-  title: string;
-  prompt?: string;
-  branch: string;
-  source?: string;
-  state: TaskState;
-  sessionId?: string;
-  prUrl?: string;
-  error?: string;
-  createdAt: string;
-  updatedAt: string;
-  runner?: 'mac' | 'cloud';
-  machine?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  activity?: string;
-  awaiting?: { kind: 'permission' | 'question'; requestId: string; text: string; preview?: string; choices?: string[] };
-  pr?: {
-    number: number;
-    url: string;
-    additions?: number;
-    deletions?: number;
-    changedFiles?: number;
-    checks?: 'passing' | 'failing' | 'pending' | 'none' | 'unknown';
-    mergeable?: boolean;
-    updatedAt?: string;
-  };
-  /** The linked session's usage (stand-out contract §1): what the run cost so far. */
-  usage?: { requests?: number; inputTokens?: number; outputTokens?: number; costUsd?: number };
-}
+export type TaskState = contract.TaskState;
 
-/** `GET /api/tasks`. */
-export interface TaskList {
-  tasks: Task[];
-  concurrency: number;
-}
+/** A task as `GET /api/tasks` and the task stream send it (the daemon's contract). */
+export type Task = contract.Task;
+
+/**
+ * The part of `GET /api/tasks` the view uses: the tasks and the concurrency
+ * limit (the repo links it also carries belong to the Run an Issue flow).
+ */
+export type TaskList = Pick<contract.TaskList, 'tasks' | 'concurrency'>;
 
 export type BucketId = 'needs-you' | 'ready' | 'running' | 'merged-today' | 'failed-today';
 
@@ -244,18 +214,12 @@ export function parseUnifiedDiff(patch: string): DiffLine[] {
 
 // --- the relay session's event log ---------------------------------------------
 
-/** One event of `GET /api/sessions/:id/events` (the kinds the transcript uses). */
-export interface SessionEvent {
-  seq?: number;
-  kind: string;
-  text?: string;
-  role?: 'user' | 'assistant';
-  name?: string;
-  input?: unknown;
-  title?: string;
-  prompt?: string;
-  message?: string;
-}
+/**
+ * One event of `GET /api/sessions/:id/events` (the daemon's contract). The
+ * stream may carry kinds this client doesn't know (new kinds are additive);
+ * the transcript ignores them.
+ */
+export type SessionEvent = contract.SessionEvent;
 
 export type TranscriptItem =
   | { kind: 'user'; text: string }

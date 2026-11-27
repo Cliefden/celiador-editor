@@ -175,6 +175,16 @@ This repository is public, and so is everything written in it: pull requests, is
 - Numbers you measured yourself, for example in a local run, a test or a benchmark, are fine as long as they aren't cost figures. So are planned settings such as a rollout percentage.
 - Check the text of a pull request, issue, comment or commit message against these rules before you publish it. Commit messages can't be changed after they are merged.
 
+<!-- Celiador edit: how work moves through the Celiador fork. -->
+## Celiador: worktrees, PRs and merge trains
+
+Parallel work happens in worktrees under `.claude/worktrees/` (gitignored), one per issue branch, through `wb` (github.com/Cliefden/workbench; the manual is its `WORKTREES.md`). `wb issue` files an issue into Backlog, `wb start <issue#>` takes one from the board (assigns, In progress, worktree; the `start-issue` skill wraps it), `wb new <issue#>` only creates and sets one up, `wb status` shows every worktree's issue, changes, push/PR state and what can be removed, and `wb pr` opens the PR and moves the issue to In review — only when the user asks, as it pushes.
+
+- Inside a worktree, run commands from its root. Never `cd` into the main checkout or other worktrees to edit or run git there. Each worktree has its own `node_modules` (`wb_setup` runs `pnpm install`).
+- The git stash is shared across worktrees. Set work aside with a WIP commit, not `git stash`.
+- PRs open as drafts, which run no Celiador checks; run the checks locally, then `gh pr ready` once. PRs land in merge trains (`wb train`), not with `gh pr merge`. `wb train land` pushes `main`: only when asked.
+- An exploitable security problem goes into a private security advisory, never an issue; its fix PR uses neutral wording, no advisory id and no closing keyword. Never put the `celiador` label on an issue: it starts an agent run.
+
 ## Learnings
 - Minimize the amount of assertions in tests. Prefer one snapshot-style `assert.deepStrictEqual` over multiple precise assertions, as they are much more difficult to understand and to update.
 - Do not stub a global object (e.g. `(mainWindow as any).ResizeObserver = ...`) or use `any` casts to install fakes in tests. Instead, make the dependency injectable: add an optional constructor parameter on the production class that defaults to the real implementation (e.g. `dom.DisposableResizeObserver`'s `resizeObserverCtor` option, which defaults to `targetWindow.ResizeObserver`), and have the test pass a fake that implements the real interface.

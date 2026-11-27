@@ -7,6 +7,8 @@
 // daemon/ENVIRONMENTS.md). Pure functions — no vscode import — so the status
 // item's wording is unit-testable. The vscode side lives in environmentStatus.ts.
 
+import type { Health } from './contract';
+
 /** A daemon environment, derived from its host name. */
 export type Environment = 'prod' | 'test' | 'dev' | 'local' | 'custom';
 
@@ -24,12 +26,12 @@ export interface BuildIdentity {
   build?: number;
 }
 
-/** What the daemon reports on `GET /api/health`. */
-export interface DaemonHealth {
-  env?: string;
-  version?: string;
-  commit?: string;
-}
+/**
+ * The parts of `GET /api/health` this view uses. Optional: an older daemon or
+ * another server on that URL may leave them out. `commit` is null when the
+ * daemon doesn't know its own commit.
+ */
+export type DaemonHealth = Partial<Pick<Health, 'env' | 'version' | 'commit'>>;
 
 export interface EnvironmentInput {
   build: BuildIdentity;
@@ -94,7 +96,7 @@ function hostOf(url: string): string {
   }
 }
 
-function shortCommit(commit: string | undefined): string | undefined {
+function shortCommit(commit: string | null | undefined): string | undefined {
   return commit ? commit.slice(0, 7) : undefined;
 }
 
