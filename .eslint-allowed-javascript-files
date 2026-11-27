@@ -27,6 +27,7 @@ build/next/devTunnelsShims/utf8Validate.cjs
 build/next/devTunnelsShims/vscodeJsonrpc.cjs
 eslint.config.js
 extensions/copilot/.mocha-multi-reporters.js
+extensions/celiador-ai/scripts/sync-contract.mjs
 extensions/copilot/.mocharc.js
 extensions/copilot/.vscode-test.mjs
 extensions/copilot/.vscode/extensions/visualization-runner/entry.js
