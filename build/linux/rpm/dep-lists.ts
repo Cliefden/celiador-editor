@@ -66,7 +66,8 @@ export const referenceGeneratedDepsByArch = {
 		'libdbus-1.so.3(LIBDBUS_1_3)(64bit)',
 		'libdl.so.2()(64bit)',
 		'libdl.so.2(GLIBC_2.2.5)(64bit)',
-		'libdl.so.2(GLIBC_2.3.3)(64bit)',
+		// Celiador edit: no libdl.so.2(GLIBC_2.3.3) — upstream lists it, but the
+		// Celiador x64 build (2026-11 sync) no longer requires it (prepare-rpm check).
 		'libexpat.so.1()(64bit)',
 		'libgbm.so.1()(64bit)',
 		'libgcc_s.so.1()(64bit)',

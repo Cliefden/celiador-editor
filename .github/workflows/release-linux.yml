@@ -72,7 +72,7 @@ jobs:
           ./build/azure-pipelines/linux/apt-retry.sh sudo apt-get update
           ./build/azure-pipelines/linux/apt-retry.sh sudo apt-get install -y \
             pkg-config libxkbfile-dev libkrb5-dev libsecret-1-dev libgbm1 \
-            fakeroot dpkg-dev rpm
+            fakeroot dpkg-dev rpm xvfb
 
       - name: Restore pnpm store cache
         id: cache-pnpm-store
@@ -112,6 +112,19 @@ jobs:
 
       - name: Download built-in extensions
         run: node build/lib/builtInExtensions.ts
+
+      - name: Let the built app start
+        # The build launches the packaged app once to generate its Node.js compile
+        # cache (build/lib/nodeCompileCache.ts, from the upstream sync). Ubuntu 24.04
+        # blocks unprivileged user namespaces, so Chromium falls back to the setuid
+        # sandbox helper, which is not root-owned in a fresh build and aborts the
+        # launch. Re-allow the namespace sandbox on this throwaway runner, and give
+        # the app a display (upstream runs this step under Xvfb on :10 too).
+        run: |
+          set -e
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          Xvfb :10 -screen 0 1024x768x24 >/dev/null 2>&1 &
+          echo "DISPLAY=:10" >> "$GITHUB_ENV"
 
       - name: Build app
         run: pnpm run gulp vscode-linux-${{ env.VSCODE_ARCH }}-min
