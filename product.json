@@ -5,8 +5,8 @@
 	"celiadorDaemonUrl": "https://celiador.ai",
 	"agentSdks": {
 		"claude": {
-			"version": "0.3.258",
-			"urlTemplate": "https://celiador.ai/sdk/claude/0.3.258/{sdkTarget}.tgz"
+			"version": "0.3.304",
+			"urlTemplate": "https://celiador.ai/sdk/claude/0.3.304/{sdkTarget}.tgz"
 		}
 	},
 	"dataFolderName": ".celiador",
